@@ -3,7 +3,7 @@ require(dplyr)
 
 #msdata <- readImzML("210427-Chen_poslip",mass.range=c(506,2000),resolution=3, folder="/media/banikr2/DATA/MALDI/demo_banikr_",)
 #msdata <- readImzML("210622_TC380_Chen_Rat", mass.range=c(345,3000), resolution=3, folder="/media/banikr2/DATA/MALDI/demo_banikr_/210622_TC380_Chen_Rat",)
-msdata <- readImzML("210603-Chen_protein_slide_F", mass.range=c(1593,23215), resolution=3, folder="/media/banikr2/DATA/MALDI/210603-Chen_protein_slide_F",)
+msdata <- readImzML("210603-Chen_protein_slide_F", mass.range=c(1593,23215), resolution=3, folder="/media/banikr2/DATA/MALDI/fromPrimatefmri/210603-Chen_protein_slide_F",)
 
 #/media/banikr2/DATA/MALDI/demo_banikr_/210622_TC380_Chen_Rat/210622_TC380_Chen_Rat.imzML
 # set.seed(2)

@@ -95,29 +95,19 @@ class IMZMLExtract:
     def check_binned_mz(self):
         """
         Checks whether all spectra have same m/z values
-
         Returns:
             bool: True if all spectra have same m/z values
-
         """
-
         bar = makeProgressBar()
-
-
         for coord in bar(self.coord2index):
             idx = self.coord2index[coord]
-
             if not np.array_equal(self.mzValues,self.parser.getspectrum(idx)[0]):
                 print("Unequal mzValues", idx, coord)
                 return False
-
         return True
-
-
 
     def _coord2index(self):
         """Returns coordinates with their respective index.
-
         Returns:
             dict: tuple of 3-dimensional coordinates to int index.
         """
@@ -126,24 +116,18 @@ class IMZMLExtract:
             retDict[coord] = sidx
         return retDict
 
-
     def get_spectrum(self, specid, normalize=False):
         """ Reads the spectrum at the specified index and can be normalized by dividing each intensity value by the maximum value observed.
-
         Args:
             specid (int): Index of the desired spectrum in the .imzML file.
             normalize (bool, optional): [description]. Defaults to False.
-
         Returns:
             numpy.array: Sequence of intensity values corresponding to mz_array of the given specid.
         """
-
         spectra1 = self.parser.getspectrum(specid)
         spectra1 = spectra1[1]
-
         if normalize:
             spectra1 = spectra1 / max(spectra1)
-        
         return spectra1
 
     def compare_spectra(self, specid1, specid2):
@@ -238,10 +222,8 @@ class IMZMLExtract:
 
     def get_region_spectra(self, regionid):
         """Returns a dictionary with the location of the region-specific pixels mapped to their spectra in the .imzML file.
-
         Args:
             regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
-
         Returns:
             dict: Dictionary of spatial (x, y, 1) coordinates to each corresponding spectrum in the .imzML file.
         """
@@ -253,65 +235,46 @@ class IMZMLExtract:
         bar = makeProgressBar()
 
         for coord in bar(self.dregions[regionid]):
-
             spectID = self.coord2index.get(coord)
-
             if spectID == None or spectID < 0:
                 print("Invalid coordinate", coord)
                 continue
 
-            cspec = self.get_spectrum( spectID )
+            cspec = self.get_spectrum(spectID)
             cspec = cspec[self.specStart:]# / 1.0
             #cspec = cspec/np.max(cspec)
             outspectra[coord] = cspec
-
         return outspectra
-
 
     def get_avg_region_spectrum(self, regionid):
         """Returns an average spectrum for spectra that belong to a given region.
-
         Args:
             regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
-
         Returns:
             numpy.array: Sequence of intensity values of the average spectrum.
         """
         region_spects = self.get_region_array(regionid)
-
         return self.get_avg_spectrum(region_spects)
 
     def get_avg_spectrum(self, region_spects):
         """Returns the average spectrum for an array of spectra.
-
         The average spectrum is the mean intensity value for all m/z values
-
         Args:
             region_spects (numpy.array): Three-dimensional array (x, y, s), where x and y are positional coordinates and s corresponds to the spectrum.
-
         Returns:
             numpy.array: Sequence of intensity values of the average spectrum.
         """
-
         avgarray = np.zeros((1, region_spects.shape[2]))
-
         for i in range(0, region_spects.shape[0]):
             for j in range(0, region_spects.shape[1]):
-
-                avgarray[:] += region_spects[i,j,:]
-
+                avgarray[:] += region_spects[i, j, :]
         avgarray = avgarray / (region_spects.shape[0]*region_spects.shape[1])
-
         return avgarray[0]
-
-
 
     def get_region_range(self, regionid):
         """Returns the shape of the queried region id in all dimensions, x,y and spectra.
-
         Args:
             regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
-
         Returns:
             [3 tuples]: x-range, y-range, z-range, and spectra dimension.
         """
@@ -571,37 +534,27 @@ class IMZMLExtract:
 
     def _get_median_spectrum(self, region_array):
         """Calculates the median spectrum of all spectra in region_array.
-
         Args:
             region_array (numpy.array): Array of spectra.
-
         Returns:
             numpy.array: Median spectrum.
         """
-
         median_profile = np.array([0.0] * region_array.shape[2])
 
         for i in range(0, region_array.shape[2]):
-
-            median_profile[i] = np.median(region_array[:,:,i])
-
+            median_profile[i] = np.median(region_array[:, :, i])
         startedLog = np.quantile([x for x in median_profile if x > 0], [0.05])[0]
         if startedLog == 0:
             startedLog = 0.001
 
         self.logger.info("Started Log Value: {}".format(startedLog))
-
         median_profile += startedLog
-
         return median_profile
-
 
     def _fivenumber(self, valuelist):
         """Creates five number statistics for values in valuelist.
-
         Args:
             valuelist (list/tuple/numpy.array (1D)): List of values to use for statistics.
-
         Returns:
             tuple: len, len>0, min, 25-quantile, 50-quantile, 75-quantile, max
         """
@@ -682,7 +635,6 @@ class IMZMLExtract:
 
     def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
         """Returns a normalized array of spectra.
-
         Args:
             region_array (numpy.array): Array of spectra to normlaize.
             normalize (str, optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.\n
@@ -697,67 +649,50 @@ class IMZMLExtract:
             lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
             p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
             iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
-
         Returns:
             numpy.array: Normalized region_array.
         """
         
         assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])
-
         if normalize in ["vector"]:
             outarray = np.zeros(region_array.shape)
-
 
         if normalize in ["baseline_cor"]:
             outarray = np.array([[self.baseline_als(y, lam, p, iters) for y in x] for x in region_array])
             return outarray
 
         if normalize in ["inter_median", "intra_median"]:
-            
             ref_spectra = self._get_median_spectrum(region_array)
-
             if normalize == "intra_median":
-
                 allMedians = []
-
                 intra_norm = np.zeros(region_array.shape)
                 medianPixel = 0
-
                 bar = makeProgressBar()
-
                 for i in bar(range(region_array.shape[0])):
                     for j in range(region_array.shape[1]):
-                        res = region_array[i,j,:]/ref_spectra
+                        res = region_array[i, j, :] / ref_spectra
                         median = np.median(res)
                         allMedians.append(median)
-
                         if median != 0:
                             medianPixel += 1
-                            intra_norm[i,j,:] = region_array[i,j, :]/median
+                            intra_norm[i, j, :] = region_array[i, j, :] / median
                         else:
-                            intra_norm[i,j,:] = region_array[i,j,:]
-
+                            intra_norm[i, j, :] = region_array[i, j, :]
                 self.logger.info("Got {} median-enabled pixels".format(medianPixel))
                 self.logger.info("5-Number stats for medians: {}".format(self._fivenumber(allMedians)))
-
                 return intra_norm
 
             elif normalize == "inter_median":
                 global_fcs = Counter()
                 scalingFactor = 100000
-
                 bar = makeProgressBar()
-
                 self.logger.info("Collecting fold changes")
                 for i in bar(range(region_array.shape[0])):
                     for j in range(region_array.shape[1]):
-
                         foldchanges = (scalingFactor * region_array[i][j] / ref_spectra).astype(int)
                         for fc in foldchanges:
                             global_fcs[fc] += 1
 
-
-                
                 totalElements = sum([global_fcs[x] for x in global_fcs])
                 self.logger.info("Got a total of {} fold changes".format(totalElements))
                 
@@ -767,11 +702,8 @@ class IMZMLExtract:
                     medianElements = [int(totalElements/2)]
 
                 sortedFCs = sorted([x for x in global_fcs])
-
                 self.logger.info("Median elements {}".format(medianElements))
-
                 medians = {}
-
                 currentCount = 0
                 for i in sortedFCs:
                     fcAdd = global_fcs[i]
@@ -782,10 +714,8 @@ class IMZMLExtract:
                     currentCount += fcAdd
 
                 self.logger.info("Median elements".format(medians))
-
                 global_median = sum([medians[x] for x in medians]) / len(medians)
                 global_median = global_median / scalingFactor
-
                 self.logger.info("Global Median {}".format(global_median))
 
                 inter_norm = np.array(region_array, copy=True)
@@ -795,14 +725,11 @@ class IMZMLExtract:
 
                 return inter_norm
 
-
         region_dims = region_array.shape
         outarray = np.array(region_array, copy=True)
-
         maxInt = 0.0
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
-
                 procSpectrum = region_array[i, j, :]
 
                 if normalize in ['max_intensity_region', 'max_intensity_all_regions']:
@@ -822,7 +749,6 @@ class IMZMLExtract:
 
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
-
                 spectrum = outarray[i, j, :]
                 spectrum = self.normalize_spectrum(spectrum, normalize=normalize, max_region_value=maxInt)
                 outarray[i, j, :] = spectrum
@@ -1704,3 +1630,163 @@ class IMZMLExtract:
 
         return outregions
 
+
+class Binning(object):
+    """
+    given the imze object should create 3D matrix(spatial based) or 2D(spectrum based)
+    spectrum: array with 2 vectors, one of abundance(1), other with m/z values(0)
+    n_bins: number of bins/samples to be digitized
+    plotspec: to plot the new binned spectrum, default--> True
+    """
+
+    def __init__(self, imzObj, regionID, n_bins, plotspec=False):
+        self.imzObj = imzObj
+        self.regionID = regionID
+        #         self.n_bins = n_bins
+        self.n_bins = len(imzObj.mzValues) + 1  #
+        self.plotspec = plotspec
+
+        self.xr, self.yr, self.zr, _ = self.imzObj.get_region_range(regionID)
+        self.imzeShape = [self.xr[1] - self.xr[0] + 1,
+                          self.yr[1] - self.yr[0] + 1, self.n_bins - 1]
+
+    def getBinMat(self):
+        sarray = np.zeros(self.imzeShape, dtype=np.float32)
+        regInd = self.imzObj.get_region_indices(self.regionID)
+        binned_mat = np.zeros([len(regInd), self.n_bins - 1])
+        coordList = []
+        #         xr, yr, zr, _ = self.imzObj.get_region_range(regionID)
+        #         self.imzeShape = [xr[1]-xr[0]+1,
+        #                  yr[1]-yr[0]+1, self.n_bins -1]
+        for i, coord in enumerate(regInd):
+            spectrum = self.imzObj.parser.getspectrum(self.imzObj.coord2index.get(coord))  # [0]
+            bSpec = self.onebinning(spectrum)
+            binned_mat[i] = bSpec
+            xpos = coord[0] - self.xr[0]
+            ypos = coord[1] - self.yr[0]
+            sarray[xpos, ypos, :] = bSpec
+            coordList.append(coord)
+        return sarray, binned_mat, coordList
+
+    def onebinning(self, spectrum):
+        """
+        returns: binned_spectrum
+        """
+        bins = np.linspace(spectrum[0][0], spectrum[0][-1], num=self.n_bins, endpoint=True)
+        hist = np.histogram(spectrum[0], bins=bins)
+        binned_spectrum = np.zeros_like(hist[0])
+        hstart = 0
+        for i in range(len(hist[0])):
+            binned_spectrum[i] = np.sum(spectrum[1][hstart:hstart + hist[0][i]])
+            hstart = hstart + hist[0][i]
+        if self.plotspec:
+            plt.plot(bins[1:], binned_spectrum)
+            plt.show()
+        return binned_spectrum
+
+# updated after Cardinal: peakpicked
+class Binning2(object):
+    """
+    given the imze object should create 3D matrix(spatial based) or 2D(spectrum based)
+    spectrum: array with 2 vectors, one of abundance(1), other with m/z values(0)
+    n_bins: number of bins/samples to be digitized
+    plotspec: to plot the new binned spectrum, default--> True
+    """
+
+    def __init__(self, imzObj, regionID, plotspec=False):
+        self.imzObj = imzObj
+        self.regionID = regionID
+        self.n_bins = len(imzObj.mzValues) + 1
+        self.plotspec = plotspec
+        self.xr, self.yr, self.zr, _ = self.imzObj.get_region_range(regionID)
+        self.imzeShape = [self.xr[1] - self.xr[0] + 1,
+                          self.yr[1] - self.yr[0] + 1, self.n_bins - 1]
+
+    def getBinMat(self):
+        sarray = np.zeros(self.imzeShape, dtype=np.float32)
+        regInd = self.imzObj.get_region_indices(self.regionID)
+        binned_mat = np.zeros([len(regInd), self.n_bins - 1])
+        coordList = []
+        #         xr, yr, zr, _ = self.imzObj.get_region_range(regionID)
+        #         self.imzeShape = [xr[1]-xr[0]+1,
+        #                  yr[1]-yr[0]+1, self.n_bins -1]
+        for i, coord in enumerate(regInd):
+            spectrum = self.imzObj.parser.getspectrum(self.imzObj.coord2index.get(coord))  # [0]
+            bSpec = self.onebinning(spectrum)
+            binned_mat[i] = bSpec
+            xpos = coord[0] - self.xr[0]
+            ypos = coord[1] - self.yr[0]
+            sarray[xpos, ypos, :] = bSpec
+            coordList.append(coord)
+        return sarray, binned_mat, coordList
+
+    def onebinning(self, spectrum):
+        """
+        returns: binned_spectrum
+        """
+        bins = np.linspace(spectrum[0][0], spectrum[0][-1], num=self.n_bins, endpoint=True)
+        hist = np.histogram(spectrum[0], bins=bins)
+        binned_spectrum = np.zeros_like(hist[0])
+        hstart = 0
+        for i in range(len(hist[0])):
+            binned_spectrum[i] = np.sum(spectrum[1][hstart:hstart + hist[0][i]])
+            hstart = hstart + hist[0][i]
+        if self.plotspec:
+            plt.plot(bins[1:], binned_spectrum)
+            plt.show()
+        return binned_spectrum
+
+
+class Binning3(object):
+    """
+    given the imze object should create 3D matrix(spatial based) or 2D(spectrum based)
+    spectrum: array with 2 vectors, one of abundance(1), other with m/z values(0)
+    n_bins: number of bins/samples to be digitized
+    plotspec: to plot the new binned spectrum, default--> True
+    """
+
+    def __init__(self, imzObj, regionID, n_bins, plotspec=False):
+        self.imzObj = imzObj
+        self.regionID = regionID
+        if n_bins is None:
+            self.n_bins = len(imzObj.mzValues) + 1
+        else:
+            self.n_bins = n_bins + 1
+        self.plotspec = plotspec
+        self.xr, self.yr, self.zr, _ = self.imzObj.get_region_range(regionID)
+        self.imzeShape = [self.xr[1] - self.xr[0] + 1,
+                          self.yr[1] - self.yr[0] + 1, self.n_bins - 1]
+
+    def getBinMat(self):
+        sarray = np.zeros(self.imzeShape, dtype=np.float32)
+        regInd = self.imzObj.get_region_indices(self.regionID)
+        binned_mat = np.zeros([len(regInd), self.n_bins - 1])
+        coordList = []
+        #         xr, yr, zr, _ = self.imzObj.get_region_range(regionID)
+        #         self.imzeShape = [xr[1]-xr[0]+1,
+        #                  yr[1]-yr[0]+1, self.n_bins -1]
+        for i, coord in enumerate(regInd):
+            spectrum = self.imzObj.parser.getspectrum(self.imzObj.coord2index.get(coord))  # [0]
+            bSpec = self.onebinning(spectrum)
+            binned_mat[i] = bSpec
+            xpos = coord[0] - self.xr[0]
+            ypos = coord[1] - self.yr[0]
+            sarray[xpos, ypos, :] = bSpec
+            coordList.append(coord)
+        return sarray, binned_mat, coordList
+
+    def onebinning(self, spectrum):
+        """
+        returns: binned_spectrum
+        """
+        bins = np.linspace(spectrum[0][0], spectrum[0][-1], num=self.n_bins, endpoint=True)
+        hist = np.histogram(spectrum[0], bins=bins)
+        binned_spectrum = np.zeros_like(hist[0])
+        hstart = 0
+        for i in range(len(hist[0])):
+            binned_spectrum[i] = np.sum(spectrum[1][hstart:hstart + hist[0][i]])
+            hstart = hstart + hist[0][i]
+        if self.plotspec:
+            plt.plot(bins[1:], binned_spectrum)
+            plt.show()
+        return binned_spectrum

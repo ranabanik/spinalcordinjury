@@ -484,7 +484,7 @@ class IMZMLExtract:
 
             lspec = list(retSpectrum)
             nlspec = list(-retSpectrum)
-            retSpectrum = np.array(stats.zscore( lspec + nlspec , nan_policy="omit")[:len(lspec)])
+            retSpectrum = np.array(stats.zscore(lspec + nlspec, nan_policy="omit")[:len(lspec)])
             retSpectrum = np.nan_to_num(retSpectrum)
             assert(len(retSpectrum) == len(lspec))
 
@@ -631,8 +631,6 @@ class IMZMLExtract:
 
         return outarray
 
-
-
     def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
         """Returns a normalized array of spectra.
         Args:
@@ -656,11 +654,9 @@ class IMZMLExtract:
         assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])
         if normalize in ["vector"]:
             outarray = np.zeros(region_array.shape)
-
         if normalize in ["baseline_cor"]:
             outarray = np.array([[self.baseline_als(y, lam, p, iters) for y in x] for x in region_array])
             return outarray
-
         if normalize in ["inter_median", "intra_median"]:
             ref_spectra = self._get_median_spectrum(region_array)
             if normalize == "intra_median":
@@ -681,7 +677,6 @@ class IMZMLExtract:
                 self.logger.info("Got {} median-enabled pixels".format(medianPixel))
                 self.logger.info("5-Number stats for medians: {}".format(self._fivenumber(allMedians)))
                 return intra_norm
-
             elif normalize == "inter_median":
                 global_fcs = Counter()
                 scalingFactor = 100000
@@ -692,7 +687,6 @@ class IMZMLExtract:
                         foldchanges = (scalingFactor * region_array[i][j] / ref_spectra).astype(int)
                         for fc in foldchanges:
                             global_fcs[fc] += 1
-
                 totalElements = sum([global_fcs[x] for x in global_fcs])
                 self.logger.info("Got a total of {} fold changes".format(totalElements))
                 
@@ -710,19 +704,16 @@ class IMZMLExtract:
                     for medElem in medianElements:
                         if currentCount < medElem <= currentCount+fcAdd:
                             medians[medElem] = i
-
                     currentCount += fcAdd
 
                 self.logger.info("Median elements".format(medians))
                 global_median = sum([medians[x] for x in medians]) / len(medians)
                 global_median = global_median / scalingFactor
                 self.logger.info("Global Median {}".format(global_median))
-
                 inter_norm = np.array(region_array, copy=True)
 
                 if global_median != 0:
                     inter_norm = inter_norm / global_median
-
                 return inter_norm
 
         region_dims = region_array.shape
@@ -734,40 +725,33 @@ class IMZMLExtract:
 
                 if normalize in ['max_intensity_region', 'max_intensity_all_regions']:
                     maxInt = max(maxInt, np.max(procSpectrum))
-
                 else:
                     retSpectrum = self.normalize_spectrum(procSpectrum, normalize=normalize)
                     outarray[i, j, :] = retSpectrum
-
         if not normalize in ['max_intensity_region', 'max_intensity_all_regions']:
             return outarray
-
         if normalize in ["max_intensity_all_regions"]:
             for idx, _ in enumerate(self.parser.coordinates):
                 mzs, intensities = p.getspectrum(idx)
                 maxInt = max(maxInt, np.max(intensities))
-
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
                 spectrum = outarray[i, j, :]
                 spectrum = self.normalize_spectrum(spectrum, normalize=normalize, max_region_value=maxInt)
                 outarray[i, j, :] = spectrum
-
         return outarray
 
     def plot_tic(self, region_array):
         """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
-
         Args:
             region_array (numpy.array): Array of spectra.
         """
         region_dims = region_array.shape
-        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
+        peakplot = np.zeros((region_array.shape[0], region_array.shape[1]))
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
-
                 spectrum = region_array[i, j, :]
-                peakplot[i,j] = sum(spectrum)
+                peakplot[i, j] = sum(spectrum)
 
         heatmap = plt.matshow(peakplot)
         plt.title("TIC (total summed intensity per pixel)", y=1.08)
@@ -785,16 +769,14 @@ class IMZMLExtract:
         peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
-
                 spectrum = region_array[i, j, :]
-                peakplot[i,j] = np.linalg.norm(spectrum)
+                peakplot[i, j] = np.linalg.norm(spectrum)
 
         heatmap = plt.matshow(peakplot)
         plt.title("TNC (total normed intensity per pixel)", y=1.08)
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
-
 
     def list_highest_peaks(self, region_array, counter=False):
         """Plots the matrix where each pixel is m/z value that corresponds to the maximum  intensity value in the corresponding pixel in region_array.
@@ -1629,7 +1611,6 @@ class IMZMLExtract:
             outregions[i] = [tuple(x) for x in allregions[i]]
 
         return outregions
-
 
 class Binning(object):
     """

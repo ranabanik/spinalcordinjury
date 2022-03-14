@@ -300,7 +300,7 @@ if __name__ != '__main__':
     plt.title("Correlation matrix heatmap")
     plt.show()
 
-if __name__ == '__main__':
+if __name__ != '__main__':
     from pIMZ.regions import SpectraRegion
     poslipPath = r'/media/banikr2/DATA/MALDI/fromCardinal/PosLip'
     plipImzFile = glob(os.path.join(poslipPath, '*.imzML'))
@@ -315,3 +315,61 @@ if __name__ == '__main__':
     spec.calculate_similarity(mode="spectra_log_dist")
     spec.segment(method="WARD", number_of_regions=5)
     spec.plot_segments()
+
+oldCDir = r'/media/banikr2/DATA/MALDI/fromCardinal/PosLip'
+oldCFile = glob(os.path.join(oldCDir, '*.imzML'))
+print(oldCFile[0])
+oldCImz = IMZMLExtract(oldCFile[0])
+rawMSdir = r'/media/banikr2/DATA/MALDI/demo_banikr_'
+rawMSpath = glob(os.path.join(rawMSdir, '*.imzML'))
+print(rawMSpath[0])
+
+rawMS = IMZMLExtract(rawMSpath[0])
+mzraw = rawMS.parser.getspectrum(200)[0]
+Yraw = rawMS.parser.getspectrum(200)[1]
+
+mzpro = oldCImz.parser.getspectrum(20)[0]
+
+from spectres import spectres
+from matplotlib import gridspec
+
+# Load the spectral data, the first column is wavelength, second flux density and third flux density uncertainty
+# spectrum = np.loadtxt("VST-ATLAS_J025.6821-33.4627.txt")
+
+# Specify the grid of wavelengths onto which you wish to sample
+regrid = np.arange(506, 2001, 1) #+ 2.5
+print(regrid[0], regrid[-1])
+# plt.plot(regrid)
+# Call the spectres function to resample the input spectrum or spectra to the new wavelength grid
+spec_resample = spectres(regrid, mz, Y)     #, spec_errs=spectrum[:,2])
+
+# plt.subplot(211)
+# plt.plot(mz, Y)
+# plt.subplot(212)
+# plt.plot(regrid, spec_resample)
+# plt.show()
+# Plotting code
+# f, (ax1, ax2) = plt.subplots(2, figsize=(15, 7))
+# gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
+#
+# ax1 = plt.subplot(gs[0])
+# ax2 = plt.subplot(gs[1])
+
+# ax1.plot(spectrum[:,0], spectrum[:,1]*10**19, color="blue", lw=1.5, label="1 $\mathrm{\AA}\ $ Sampling")
+# ax1.plot(regrid, spec_resample*10**19, color="red", lw=1.5, label="5 $\mathrm{\AA}\ $ Sampling")
+
+
+# ax2.plot(spectrum[:,0], spectrum[:,2]*10**19, color="blue", lw=1.5)
+# ax2.plot(regrid, spec_errs_resample*10**19, color="red", lw=1.5)
+
+# ax1.set_ylabel("Flux ($10^{-19}\ \mathrm{W/m^2/\\AA)}$", size=18)
+# ax2.set_ylabel("Flux Error", size=18)
+
+# ax2.set_xlabel("Wavelength ($\mathrm{\AA}$)", size=18)
+
+# ax1.set_xlim(6800, 9000)
+# ax1.set_ylim(-0.15, 0.65)
+# ax2.set_xlim(6800, 9000)
+# ax2.set_ylim(0, 0.08)
+# ax1.legend()
+# plt.show()

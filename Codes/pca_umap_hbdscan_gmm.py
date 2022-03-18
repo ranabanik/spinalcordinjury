@@ -105,48 +105,52 @@ if __name__ !='__main__':
     oldCFile = glob(os.path.join(oldCDir, '*.imzML'))
     print(oldCFile[0])
     oldCImz = IMZMLExtract(oldCFile[0])
-
     ##
     regionID = 1
     oldLipidObj = Binning2(oldCImz, 1)
     oldLipid1 = oldLipidObj.getBinMat()
     nSpecs, nBins = oldLipid1[1].shape
     print("There are {} spectrums and {} m/z bins".format(nSpecs, nBins))
-
     matr = {"data": oldLipid1[1], "label": "region 1(only spectras)"}
     savemat(os.path.join(oldCDir, 'oldLipid1.mat'), matr)
 
 ## read data
-datapath = glob(os.path.join(oldCDir, 'oldLipid1.mat'))
-print(datapath[0])
-data = loadmat(datapath[0])
-print(sorted(data.keys()))
+if __name__ != '__main__':
+    datapath = glob(os.path.join(oldCDir, 'oldLipid1.mat'))
+    print(datapath[0])
+    data = loadmat(datapath[0])
+    print(sorted(data.keys()))
 
-data = data['data']
-print(data.shape)
-nSpecs, nBins = data.shape
-printStat(data)
+    data = data['data']
+    print(data.shape)
+    nSpecs, nBins = data.shape
+    printStat(data)
 
+# +-------------------+
+# |   standardize     |
+# +-------------------+
 if __name__ != '__main__':
     ## min max normalization
-    normScaler = MinMaxScaler()
-    data_norm = normScaler.fit_transform(data)
+    # normScaler = MinMaxScaler()
+    #     # data_norm = normScaler.fit_transform(data)
+    #     # printStat(data_norm)
+    # data_norm = data
+
+    data_norm = np.zeros_like(data)
+    for s in range(0, nSpecs):
+        data_norm[s, :] = normalize_spectrum(data[s, :], normalize='tic')
     printStat(data_norm)
-# data_norm = data
 
-data_norm = np.zeros_like(data)
-for s in range(0, nSpecs):
-    data_norm[s, :] = normalize_spectrum(data[s, :], normalize='tic')
-
-printStat(data_norm)
-
-## standardization
-# stanScaler = StandardScaler(with_mean=True, with_std=True)
-# data_norm_ss = stanScaler.fit_transform(data_norm)
-data_norm_ss = makeSS(data_norm)
-print("Standardized stat: ")
-printStat(data_norm_ss)
-
+    ## standardization
+    # stanScaler = StandardScaler(with_mean=True, with_std=True)
+    # data_norm_ss = stanScaler.fit_transform(data_norm)
+    data_norm_ss = makeSS(data_norm)
+    print("Standardized stat: ")
+    printStat(data_norm_ss)
+    data = pd.DataFrame(data_norm_ss)
+    pixel_feature = data.values.astype(np.float64)
+    print("Pixel feature: ")
+    printStat(pixel_feature)
 
 # +----------------+
 # |  plot spectra  |
@@ -218,11 +222,6 @@ if __name__ != '__main__':
     plt.show()
     print(np.min(filtered))
 
-data = pd.DataFrame(data_norm_ss)
-pixel_feature = data.values.astype(np.float64)
-print("Pixel feature: ")
-printStat(pixel_feature)
-
 # +------------+
 # |    PCA     |
 # +------------+
@@ -242,8 +241,16 @@ if __name__ != '__main__':
     nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
     print("Nearest variance to threshold {:.4f} explained by PCA components {}".format(cut_evr, nPCs))
     df_pixel_rep = pd.DataFrame(data=pcs_all[:, 0:nPCs], columns=['PC_%d' % (i+1) for i in range(nPCs)])
+    df_pixel_rep.insert(0, 'spectrum_index', [i for i in range(nSpecs)])
+    df_pixel_rep.insert(0, 'label_index', [0 for i in range(nSpecs)]) # this is probably not required?
     print(df_pixel_rep, df_pixel_rep.shape)
     print(pca_all.n_features_)
+    if __name__ != '__main__':
+        # matr = {"data": df_pixel_rep.values, "info": "data after pca,variance:{}, components:{}".format(threshold, nPCs)}
+        # savemat(os.path.join(oldCDir, 'data_pca.mat'), matr)
+        savecsv = os.path.join(oldCDir, 'df_pixel_rep.csv')
+        df_pixel_rep.to_csv(savecsv, index=False, sep=',')
+        # df_pixel_rep.to_csv(savecsv, index=True, index_label='Spectrum_index', sep=',')
 
 # +------------------+
 # |    plot PCA      |
@@ -302,7 +309,9 @@ if __name__ != '__main__':
 # +------------------+
 # |      UMAP        |
 # +------------------+
-if __name__ == '__main__':
+if __name__ != '__main__':
+    pca_path = os.path.join(oldCDir, 'df_pixel_rep.csv')
+    df_pixel_rep = pd.read_csv(pca_path)
     reducer = UMAP(n_neighbors=12,  # default 15, The size of local neighborhood (in terms of number of neighboring sample points) used for manifold approximation.
                n_components=3,  # default 2, The dimension of the space to embed into.
                metric='cosine',  # default 'euclidean', The metric to use to compute distances in high dimensional space.
@@ -330,16 +339,16 @@ if __name__ == '__main__':
                verbose=True, # default False, Controls verbosity of logging.
                unique=False # default False, Controls if the rows of your data should be uniqued before being embedded.
               )
-    # data_umap = reducer.fit_transform(df_pixel_rep)
+    data_umap = reducer.fit_transform(df_pixel_rep.values[:,2:])
     # matr = {"data": data_umap, "info": "umap transformation: {}".format(reducer.get_params())}
     # savemat(os.path.join(oldCDir, 'data_umap.mat'), matr)
 
-data_umap_path = glob(os.path.join(oldCDir, 'data_umap.mat'))
-print(data_umap_path[0])
-data_umap_obj = loadmat(data_umap_path[0])
-print(sorted(data_umap_obj.keys()))
-data_umap = data_umap_obj['data']
-# print(data_umap_obj["info"])
+    data_umap_path = glob(os.path.join(oldCDir, 'data_umap.mat'))
+    # print(data_umap_path[0])
+    data_umap_obj = loadmat(data_umap_path[0])
+    # print(sorted(data_umap_obj.keys()))
+    data_umap = data_umap_obj['data']
+    # print(data_umap_obj["info"])
 
 # +---------------+
 # |   UMAP plot   |
@@ -373,7 +382,6 @@ if __name__ != '__main__':
     min_cluster_size = 250
     min_samples = 30
     cluster_selection_method = 'eom' #eom
-
     if HDBSCAN_soft:
         clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
                                     cluster_selection_method=cluster_selection_method, prediction_data=True)\
@@ -417,16 +425,51 @@ if __name__ != '__main__':
     chart(data_umap, labels)
     plt.suptitle("n_neighbors={}, Cosine metric".format(reducer.n_neighbors))
 
-    # if __name__ == '__main__':
-    #     matr = {"data": labels, "info": "labels of clusters"}
-    #     savemat(os.path.join(oldCDir, 'label_umap_hdbscan.mat'), matr)
+    if __name__ != '__main__':
+        matr = {"data": labels, "info": "labels of clusters"}
+        savemat(os.path.join(oldCDir, 'label_umap_hdbscan.mat'), matr)
 
-labelpath = glob(os.path.join(oldCDir, 'label_umap_hdbscan.mat'))
-print(labelpath[0])
-labels_obj = loadmat(labelpath[0])
-print(sorted(data.keys()))
-labels = labels_obj['data']
+# labelpath = glob(os.path.join(oldCDir, 'label_umap_hdbscan.mat'))
+# # print(labelpath[0])
+# labels_obj = loadmat(labelpath[0])
+# # print(sorted(data.keys()))
+# labels = labels_obj['data']
 
+# +--------------------------------------+
+# |   Segmentation on PCA+UMAP+HDBSCAN   |
+# +--------------------------------------+
+if __name__ == '__main__':
+    oldCFile = glob(os.path.join(oldCDir, '*.imzML'))
+    print(oldCFile[0])
+    oldCImz = IMZMLExtract(oldCFile[0])
+    ##
+    regionID = 1
+    labelpath = glob(os.path.join(oldCDir, 'label_umap_hdbscan.mat'))
+    # print(labelpath[0])
+    labels_obj = loadmat(labelpath[0])
+    # print(sorted(data.keys()))
+    labels = labels_obj['data'].squeeze()
+    print("labels: ", labels) #.squeeze()) #np.array(labels, dtype=object))
+    print(["{}:{}".format(l, np.sum(labels == l)) for l in np.unique(labels)])
+
+    regInd = oldCImz.get_region_indices(regionID)
+    xr, yr, zr, _ = oldCImz.get_region_range(regionID)
+    xx, yy, _ = oldCImz.get_region_shape(regionID)
+    sarray1 = np.zeros([xx, yy])
+    # for idx,coord in enumerate(oldLipid1[2]):
+    #     print(idx, coord, assignment[idx])
+    labels[np.where(labels==19)]=0
+    for idx, coord in enumerate(regInd):
+        print(idx, coord, oldCImz.coord2index.get(coord))
+        xpos = coord[0] - xr[0]
+        ypos = coord[1] - yr[0]
+        sarray1[xpos, ypos] = labels[idx] + 1
+    fig, ax = plt.subplots(figsize=(6, 8))
+    sarrayIm = ax.imshow(sarray1)
+    # cax = fig.add_axes([0.27, 0.8, 0.5, 0.05])
+    fig.colorbar(sarrayIm)
+    ax.set_title('reg 1 seg: PCA+UMAP with HDBSCAN labeling', fontsize=15, loc='center')
+    plt.show()
 # +---------------+
 # |   tree plots  |
 # +---------------+
@@ -441,31 +484,40 @@ if __name__ != '__main__':
 # +-----------------+
 # |     GMM         |
 # +-----------------+
-n_components = 10
-span = 5
+pca_path = os.path.join(oldCDir, 'df_pixel_rep.csv')
+df_pixel_rep = pd.read_csv(pca_path)
+print(df_pixel_rep.columns)
 
-n_component = generate_nComponentList(n_components, span)
-print(n_component)
-nPCs = retrace_columns(df_pixel_rep.columns.values, 'PC')
-print(nPCs)
-pixel_rep = df_pixel_rep.values.astype(np.float64)
-pcs = pixel_rep[:, 2:nPCs + 2]
-repeat = 1  # integer
-df_pixel_label = pd.DataFrame(data=df_pixel_rep[['line_index', 'spectrum_index']].values.astype(int), columns=['line_index','spectrum_index'])
+if __name__ != '__main__':
+    n_components = 10
+    span = 5
+    n_component = generate_nComponentList(n_components, span)
+    print(n_component)
+    nPCs = 9    #  retrace_columns(df_pixel_rep.columns.values, 'PC')   # 9
+    print(nPCs)
+    pixel_rep = df_pixel_rep.values.astype(np.float64)
+    pcs = pixel_rep[:, 2:nPCs + 2]
+    # print(pcs)
+    repeat = 1  # integer
+    df_pixel_label = pd.DataFrame(data=df_pixel_rep[['line_index', 'spectrum_index']].values.astype(int), columns=['line_index','spectrum_index'])
+    print(df_pixel_label)
 
-for i in range(repeat):  # may repeat several times
-    for j in range(n_component.shape[0]):  # ensemble with different n_component value
-        StaTime = time.time()
-        gmm = GMM(n_components=n_component[j], max_iter=500)  # max_iter does matter, no random seed assigned
-        labels = gmm.fit_predict(pcs)
+if __name__ != '__main__':
+    for i in range(repeat):  # may repeat several times
+        for j in range(n_component.shape[0]):  # ensemble with different n_component value
+            StaTime = time.time()
+            gmm = GMM(n_components=n_component[j], max_iter=500)  # max_iter does matter, no random seed assigned
+            labels = gmm.fit_predict(pcs)
+            # save data
+            index = j + 1 + i * n_component.shape[0]
+            title = 'No.' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
+            df_pixel_label[title] = labels
 
-        # save data
-        index = j + 1 + i * n_component.shape[0]
-        title = 'No.' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
-        df_pixel_label[title] = labels
+            SpenTime = (time.time() - StaTime)
 
-        SpenTime = (time.time() - StaTime)
-
-        # progressbar
-        print('{}/{}, finish classifying {}, running time is: {} s'.format(index, repeat * span, title,
+            # progressbar
+            print('{}/{}, finish classifying {}, running time is: {} s'.format(index, repeat * span, title,
                                                                            round(SpenTime, 2)))
+    # print(df_pixel_label)
+    savecsv = os.path.join(oldCDir, 'df_pixel_label.csv')
+    df_pixel_label.to_csv(savecsv, index=False, sep=',')

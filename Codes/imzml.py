@@ -2,59 +2,119 @@
 import math
 import logging
 import json
-import os,sys
+import os, sys
 import random
 from collections import defaultdict, Counter
 import glob
 import shutil, io, base64
-
 # general package
 from natsort import natsorted
 import pandas as pd
-
 import numpy as np
 from numpy.ctypeslib import ndpointer
-
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
 import ms_peak_picker
 import regex as re
-
-
 # image
 import skimage
 from skimage import measure as sk_measure
-
 # processing
 import dill as pickle
-
-
 #vis
 import dabest
 import matplotlib
 import matplotlib.pyplot as plt
-
 from scipy import ndimage, misc, sparse, signal, stats, interpolate
 from scipy.sparse.linalg import spsolve
-
-from pykeops.numpy import LazyTensor
-
-
+# from pykeops.numpy import LazyTensor
 #web/html
 import jinja2
 
-
 # applications
 import progressbar
+
+def normSpec(spec, norm_type):
+    """
+    normalize single spectrum
+    """
+    if norm_type in ['tic']:
+        p = 1
+        factor = np.power(np.sum(np.power(spec, p)), np.reciprocal(float(p)))
+    elif norm_type in ['vector']:
+        p = 2
+        factor = np.power(np.sum(np.power(spec, p)), np.reciprocal(float(p)))
+    elif norm_type in ['median']:
+        factor = np.median(spec)
+    elif norm_type in ['max']:
+        factor = np.max(spec)
+    else:
+        p = norm_type
+        factor = np.power(np.sum(np.power(spec, p)), np.reciprocal(float(p)))
+    return spec/factor
 
 def makeProgressBar():
     return progressbar.ProgressBar(widgets=[
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
 
+def normalize_spectrum(spectrum, normalize=None, max_region_value=None):
+    """Normalizes a single spectrum.
+    Args:
+        spectrum (numpy.array): Spectrum to normalize.
+        normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "vector". Defaults to None.\n
+            - "max_intensity_spectrum": divides the spectrum by the maximum intensity value.\n
+            - "max_intensity_region"/"max_intensity_all_regions": divides the spectrum by custom max_region_value.\n
+            - "vector": divides the spectrum by its norm.\n
+            - "tic": divides the spectrum by its TIC (sum).\n
+        max_region_value (int/float, optional): Value to normalize to for max-region-intensity norm. Defaults to None.
+
+    Returns:
+        numpy.array: Normalized spectrum.
+    """
+    assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
+    retSpectrum = np.array(spectrum, copy=True)
+
+    if normalize in ["max_intensity_region", "max_intensity_all_regions"]:
+        assert(max_region_value != None)
+
+    if normalize == "max_intensity_spectrum":
+        retSpectrum = retSpectrum / np.max(retSpectrum)
+        return retSpectrum
+
+    elif normalize in ["max_intensity_region", "max_intensity_all_regions"]:
+        retSpectrum = retSpectrum / max_region_value
+        return retSpectrum
+
+    elif normalize in ["tic"]:
+        specSum = sum(retSpectrum)
+        if specSum > 0:
+            retSpectrum = (retSpectrum / specSum) * len(retSpectrum)
+        return retSpectrum
+
+    elif normalize in ["zscore"]:
+        lspec = list(retSpectrum)
+        nlspec = list(-retSpectrum)
+        retSpectrum = np.array(stats.zscore(lspec + nlspec, nan_policy="omit")[:len(lspec)])
+        retSpectrum = np.nan_to_num(retSpectrum)
+        assert(len(retSpectrum) == len(lspec))
+        return retSpectrum
+
+    elif normalize == ["vector"]:
+        slen = np.linalg.norm(retSpectrum)
+        if slen < 0.01:
+            retSpectrum = retSpectrum * 0
+        else:
+            retSpectrum = retSpectrum / slen
+        #with very small spectra it can happen that due to norm the baseline is shifted up!
+        retSpectrum[retSpectrum < 0.0] = 0.0
+        retSpectrum = retSpectrum - np.min(retSpectrum)
+        if not np.linalg.norm(retSpectrum) <= 1.01:
+            print(slen, np.linalg.norm(retSpectrum))
+        return retSpectrum
+
 class IMZMLExtract:
     """IMZMLExtract class is required to access and retrieve data from an imzML file.
     """
-
     def __init__(self, fname):
         """
         Constructs an IMZMLExtract object with the following attributes:\n
@@ -445,7 +505,6 @@ class IMZMLExtract:
 
     def normalize_spectrum(self, spectrum, normalize=None, max_region_value=None):
         """Normalizes a single spectrum.
-
         Args:
             spectrum (numpy.array): Spectrum to normalize.
             normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "vector". Defaults to None.\n
@@ -458,9 +517,7 @@ class IMZMLExtract:
         Returns:
             numpy.array: Normalized spectrum.
         """
-
         assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
-
         retSpectrum = np.array(spectrum, copy=True)
 
         if normalize in ["max_intensity_region", "max_intensity_all_regions"]:

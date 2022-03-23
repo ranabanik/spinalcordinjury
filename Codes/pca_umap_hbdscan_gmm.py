@@ -18,6 +18,15 @@ import pywt
 import pandas as pd
 import time
 
+exprun_name = 'pca_umap_hdbscan_gmm_'
+TIME_STAMP = time.strftime('%Y-%m-%d-%H-%M-%S')
+if exprun_name:
+    exprun = exprun_name + TIME_STAMP
+else:
+    exprun = TIME_STAMP
+
+print(exprun)
+
 RandomState = 20210131
 
 oldCDir = r'C:\Data\PosLip'
@@ -97,7 +106,7 @@ def retrace_columns(df_columns, keyword): # df_columns: nparray of df_columns. k
         element = i.split('_')
         for j in element:
             if j == keyword:
-                counts +=1
+                counts += 1
     return counts
 
 if __name__ !='__main__':
@@ -118,10 +127,10 @@ if __name__ !='__main__':
 if __name__ != '__main__':
     datapath = glob(os.path.join(oldCDir, 'oldLipid1.mat'))
     print(datapath[0])
-    data = loadmat(datapath[0])
-    print(sorted(data.keys()))
+    data_obj = loadmat(datapath[0])
+    print(sorted(data_obj.keys()))
 
-    data = data['data']
+    data = data_obj['data']
     print(data.shape)
     nSpecs, nBins = data.shape
     printStat(data)
@@ -241,14 +250,14 @@ if __name__ != '__main__':
     nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
     print("Nearest variance to threshold {:.4f} explained by PCA components {}".format(cut_evr, nPCs))
     df_pixel_rep = pd.DataFrame(data=pcs_all[:, 0:nPCs], columns=['PC_%d' % (i+1) for i in range(nPCs)])
-    df_pixel_rep.insert(0, 'spectrum_index', [i for i in range(nSpecs)])
-    df_pixel_rep.insert(0, 'label_index', [0 for i in range(nSpecs)]) # this is probably not required?
+    # df_pixel_rep.insert(0, 'spectrum_index', [i for i in range(nSpecs)])
+    # df_pixel_rep.insert(0, 'label_index', [0 for i in range(nSpecs)]) # this is probably not required?
     print(df_pixel_rep, df_pixel_rep.shape)
     print(pca_all.n_features_)
-    if __name__ != '__main__':
+    if __name__ == '__main__':
         # matr = {"data": df_pixel_rep.values, "info": "data after pca,variance:{}, components:{}".format(threshold, nPCs)}
         # savemat(os.path.join(oldCDir, 'data_pca.mat'), matr)
-        savecsv = os.path.join(oldCDir, 'df_pixel_rep.csv')
+        savecsv = os.path.join(oldCDir, '{}.csv'.format(exprun))
         df_pixel_rep.to_csv(savecsv, index=False, sep=',')
         # df_pixel_rep.to_csv(savecsv, index=True, index_label='Spectrum_index', sep=',')
 
@@ -310,8 +319,11 @@ if __name__ != '__main__':
 # |      UMAP        |
 # +------------------+
 if __name__ != '__main__':
-    pca_path = os.path.join(oldCDir, 'df_pixel_rep.csv')
-    df_pixel_rep = pd.read_csv(pca_path)
+    # pca_path = os.path.join(oldCDir, '{}.csv'.format(exprun))
+    # pca_path = os.path.join(oldCDir, 'oldLipid1.mat')
+    # df_pixel_rep = pd.read_csv(pca_path)
+    # df_pixel_rep = loadmat(pca_path)
+    # df_pixel_rep = df_pixel_rep['data']
     reducer = UMAP(n_neighbors=12,  # default 15, The size of local neighborhood (in terms of number of neighboring sample points) used for manifold approximation.
                n_components=3,  # default 2, The dimension of the space to embed into.
                metric='cosine',  # default 'euclidean', The metric to use to compute distances in high dimensional space.
@@ -339,23 +351,32 @@ if __name__ != '__main__':
                verbose=True, # default False, Controls verbosity of logging.
                unique=False # default False, Controls if the rows of your data should be uniqued before being embedded.
               )
-    data_umap = reducer.fit_transform(df_pixel_rep.values[:,2:])
-    # matr = {"data": data_umap, "info": "umap transformation: {}".format(reducer.get_params())}
-    # savemat(os.path.join(oldCDir, 'data_umap.mat'), matr)
+    data_umap = reducer.fit_transform(df_pixel_rep.values) # on pca
+    for i in range(reducer.n_components):
+        df_pixel_rep.insert(df_pixel_rep.shape[1], column='umap_{}'.format(i + 1), value=data_umap[:, i])
 
-    data_umap_path = glob(os.path.join(oldCDir, 'data_umap.mat'))
-    # print(data_umap_path[0])
-    data_umap_obj = loadmat(data_umap_path[0])
+    if __name__ != '__main__':
+        savecsv = os.path.join(oldCDir, '{}.csv'.format(exprun))
+        df_pixel_rep.to_csv(savecsv, index=False, sep=',')
+        matr = {"data": df_pixel_rep.values, "n_neighbors": reducer.n_neighbors, "info": "norm/pca/umap: {}".format(reducer.get_params())}
+        savemat(os.path.join(oldCDir, '{}.mat'.format(exprun)), matr)
+
+if __name__ != '__main__':
+    data_pca_umap_path = os.path.join(oldCDir, 'all2022-03-21-19-02-17.csv')
+    data_pca_umap = pd.read_csv(data_pca_umap_path)
+    print(data_pca_umap.columns)
+    print(data_pca_umap.values[:, 0])
+    # data_umap_obj = loadmat(data_umap_path)
     # print(sorted(data_umap_obj.keys()))
-    data_umap = data_umap_obj['data']
-    # print(data_umap_obj["info"])
+    # data_umap = data_umap_obj['data']
+    data_umap = data_pca_umap.values[:, 9:]
 
 # +---------------+
 # |   UMAP plot   |
 # +---------------+
 if __name__ != '__main__':
     plt.figure(figsize=(12, 10))
-    plt.scatter(data_umap[:, 1], data_umap[:, 2], facecolors='None', edgecolors=cm.tab20(10), alpha=0.5)
+    plt.scatter(data_umap[:, 0], data_umap[:, 1], facecolors='None', edgecolors=cm.tab20(10), alpha=0.5)
     plt.xlabel('UMAP1', fontsize=30) #only difference part from last one
     plt.ylabel('UMAP2', fontsize=30)
 
@@ -373,6 +394,10 @@ if __name__ != '__main__':
     # SaveDir = OutputFolder + '\\exploratory results\\UMAP_plot.png'
     # plt.savefig(SaveDir)
     # plt.close()
+
+    # import umap.plot
+    #
+    # umap.plot.points(data_umap)
 
 # +-------------+
 # |   HDBSCAN   |
@@ -421,19 +446,23 @@ if __name__ != '__main__':
     # SaveDir = OutputFolder + '\\exploratory results\\UMAP_HDBSCAN_plot.png'
     # plt.savefig(SaveDir)
     # plt.close()
-
+    # print(clusterer.__dict__)
     chart(data_umap, labels)
-    plt.suptitle("n_neighbors={}, Cosine metric".format(reducer.n_neighbors))
+    plt.suptitle("n_neighbors={}, Cosine metric".format(12))
 
     if __name__ != '__main__':
-        matr = {"data": labels, "info": "labels of clusters"}
-        savemat(os.path.join(oldCDir, 'label_umap_hdbscan.mat'), matr)
+        data_pca_umap.insert(data_pca_umap.shape[1], column='hdbscan_labels', value=labels)
+        savecsv = os.path.join(oldCDir, '{}.csv'.format(exprun))
+        data_pca_umap.to_csv(savecsv, index=False, sep=',')
+        # matr = {"data": labels, "info": 'after umap'}
+        # savemat(os.path.join(oldCDir, 'label_umap_hdbscan_{}.mat'.format(exprun)), matr)
 
 # labelpath = glob(os.path.join(oldCDir, 'label_umap_hdbscan.mat'))
 # # print(labelpath[0])
 # labels_obj = loadmat(labelpath[0])
 # # print(sorted(data.keys()))
-# labels = labels_obj['data']
+# labels = labels_obj['data'].squeeze()
+# print(labels)
 
 # +--------------------------------------+
 # |   Segmentation on PCA+UMAP+HDBSCAN   |
@@ -444,32 +473,37 @@ if __name__ == '__main__':
     oldCImz = IMZMLExtract(oldCFile[0])
     ##
     regionID = 1
-    labelpath = glob(os.path.join(oldCDir, 'label_umap_hdbscan.mat'))
-    # print(labelpath[0])
-    labels_obj = loadmat(labelpath[0])
-    # print(sorted(data.keys()))
-    labels = labels_obj['data'].squeeze()
+    # labelpath = glob(os.path.join(oldCDir, 'label_umap_hdbscan.mat'))
+    # # print(labelpath[0])
+    # labels_obj = loadmat(labelpath[0])
+    # # print(sorted(data.keys()))
+    # labels = labels_obj['data'].squeeze()
+    pca_path = os.path.join(oldCDir, 'hdbscan_2022-03-22-12-41-33.csv')
+    df_pixel_rep_label = pd.read_csv(pca_path)
+    print(df_pixel_rep_label.columns)
+    labels = df_pixel_rep_label['hdbscan_labels'].values
     print("labels: ", labels) #.squeeze()) #np.array(labels, dtype=object))
     print(["{}:{}".format(l, np.sum(labels == l)) for l in np.unique(labels)])
+    if __name__ == '__main__':
+        regInd = oldCImz.get_region_indices(regionID)
+        xr, yr, zr, _ = oldCImz.get_region_range(regionID)
+        xx, yy, _ = oldCImz.get_region_shape(regionID)
+        sarray1 = np.zeros([xx, yy])
+        # for idx,coord in enumerate(oldLipid1[2]):
+        #     print(idx, coord, assignment[idx])
+        labels[np.where(labels == 19)] = 0
+        for idx, coord in enumerate(regInd):
+            print(idx, coord, oldCImz.coord2index.get(coord))
+            xpos = coord[0] - xr[0]
+            ypos = coord[1] - yr[0]
+            sarray1[xpos, ypos] = labels[idx] + 1
+        fig, ax = plt.subplots(figsize=(6, 8))
+        sarrayIm = ax.imshow(sarray1)
+        # cax = fig.add_axes([0.27, 0.8, 0.5, 0.05])
+        fig.colorbar(sarrayIm)
+        ax.set_title('reg1: HDBSCAN labeling', fontsize=15, loc='center')
+        plt.show()
 
-    regInd = oldCImz.get_region_indices(regionID)
-    xr, yr, zr, _ = oldCImz.get_region_range(regionID)
-    xx, yy, _ = oldCImz.get_region_shape(regionID)
-    sarray1 = np.zeros([xx, yy])
-    # for idx,coord in enumerate(oldLipid1[2]):
-    #     print(idx, coord, assignment[idx])
-    labels[np.where(labels==19)]=0
-    for idx, coord in enumerate(regInd):
-        print(idx, coord, oldCImz.coord2index.get(coord))
-        xpos = coord[0] - xr[0]
-        ypos = coord[1] - yr[0]
-        sarray1[xpos, ypos] = labels[idx] + 1
-    fig, ax = plt.subplots(figsize=(6, 8))
-    sarrayIm = ax.imshow(sarray1)
-    # cax = fig.add_axes([0.27, 0.8, 0.5, 0.05])
-    fig.colorbar(sarrayIm)
-    ax.set_title('reg 1 seg: PCA+UMAP with HDBSCAN labeling', fontsize=15, loc='center')
-    plt.show()
 # +---------------+
 # |   tree plots  |
 # +---------------+
@@ -482,35 +516,42 @@ if __name__ != '__main__':
     plt.show()
 
 # +-----------------+
-# |     GMM         |
+# |       GMM       |
 # +-----------------+
-pca_path = os.path.join(oldCDir, 'df_pixel_rep.csv')
-df_pixel_rep = pd.read_csv(pca_path)
-print(df_pixel_rep.columns)
+if __name__ != '__main__':
+    pca_path = os.path.join(oldCDir, 'hdbscan_2022-03-22-12-41-33.csv')
+    df_pixel_rep_label = pd.read_csv(pca_path)
+    print(df_pixel_rep_label.columns[9:12])
+    # df_pixel_rep['label_index'] = labels
+    #
+    # print(df_pixel_rep_label.values[:, 9:])
+    #
+    # savecsv = os.path.join(oldCDir, 'df_pixel_rep_label.csv')
+    # df_pixel_rep.to_csv(savecsv, index=False, sep=',')
 
 if __name__ != '__main__':
-    n_components = 10
+    n_components = 5
     span = 5
     n_component = generate_nComponentList(n_components, span)
-    print(n_component)
+    print("n_component: ", n_component)
     nPCs = 9    #  retrace_columns(df_pixel_rep.columns.values, 'PC')   # 9
-    print(nPCs)
-    pixel_rep = df_pixel_rep.values.astype(np.float64)
-    pcs = pixel_rep[:, 2:nPCs + 2]
-    # print(pcs)
-    repeat = 1  # integer
-    df_pixel_label = pd.DataFrame(data=df_pixel_rep[['line_index', 'spectrum_index']].values.astype(int), columns=['line_index','spectrum_index'])
+    print("nPCs: ", nPCs)
+    pixel_rep = df_pixel_rep_label.values.astype(np.float64)
+    pcs_umap = pixel_rep[:, 9:12] #[:, 0:12]
+    print(pcs_umap.shape)
+    repeat = 2  # integer
+    df_pixel_label = pd.DataFrame(df_pixel_rep_label['hdbscan_labels']) #pd.DataFrame(data=df_pixel_rep_label[['label_index', 'spectrum_index']].values.astype(int), columns=['label_index', 'spectrum_index'])
     print(df_pixel_label)
 
 if __name__ != '__main__':
     for i in range(repeat):  # may repeat several times
         for j in range(n_component.shape[0]):  # ensemble with different n_component value
             StaTime = time.time()
-            gmm = GMM(n_components=n_component[j], max_iter=500)  # max_iter does matter, no random seed assigned
-            labels = gmm.fit_predict(pcs)
+            gmm = GMM(n_components=n_component[j], max_iter=5000)  # max_iter does matter, no random seed assigned
+            labels = gmm.fit_predict(pcs_umap)
             # save data
             index = j + 1 + i * n_component.shape[0]
-            title = 'No.' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
+            title = 'gmm' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
             df_pixel_label[title] = labels
 
             SpenTime = (time.time() - StaTime)
@@ -518,6 +559,37 @@ if __name__ != '__main__':
             # progressbar
             print('{}/{}, finish classifying {}, running time is: {} s'.format(index, repeat * span, title,
                                                                            round(SpenTime, 2)))
-    # print(df_pixel_label)
-    savecsv = os.path.join(oldCDir, 'df_pixel_label.csv')
-    df_pixel_label.to_csv(savecsv, index=False, sep=',')
+    print(df_pixel_label)
+    oldCFile = glob(os.path.join(oldCDir, '*.imzML'))
+    oldCImz = IMZMLExtract(oldCFile[0])
+    regionID = 1
+
+    for (columnName, columnData) in df_pixel_label.iteritems():
+        print('Column Name : ', columnName)
+        print('Column Contents : ', columnData.values)
+
+        regInd = oldCImz.get_region_indices(regionID)
+        xr, yr, zr, _ = oldCImz.get_region_range(regionID)
+        xx, yy, _ = oldCImz.get_region_shape(regionID)
+        sarray1 = np.zeros([xx, yy])
+        # for idx,coord in enumerate(oldLipid1[2]):
+        #     print(idx, coord, assignment[idx])
+        labels[np.where(labels == 19)] = 0
+        for idx, coord in enumerate(regInd):
+            # print(idx, coord, oldCImz.coord2index.get(coord))
+            xpos = coord[0] - xr[0]
+            ypos = coord[1] - yr[0]
+            sarray1[xpos, ypos] = columnData.values[idx] + 1
+        fig, ax = plt.subplots(figsize=(6, 8))
+        sarrayIm = ax.imshow(sarray1)
+        # cax = fig.add_axes([0.27, 0.8, 0.5, 0.05])
+        fig.colorbar(sarrayIm)
+        ax.set_title('reg 1: UMAP w GMM {} labelling'.format(columnName), fontsize=15, loc='center')
+        plt.show()
+
+    frames = [df_pixel_rep_label, df_pixel_label]
+    pca_umap_hdbscan_gmm = pd.concat(frames)
+    savecsv = os.path.join(oldCDir, '{}.csv'.format(exprun))
+    pca_umap_hdbscan_gmm.to_csv(savecsv, index=False, sep=',')
+
+

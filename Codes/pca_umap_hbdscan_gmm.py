@@ -1,6 +1,7 @@
 import os
 from glob import glob
 import numpy as np
+from numpy.lib.stride_tricks import as_strided
 from imzml import IMZMLExtract, Binning2, normSpec, normalize_spectrum
 from scipy.io import savemat, loadmat
 import scipy.cluster.hierarchy as shc
@@ -109,6 +110,66 @@ def retrace_columns(df_columns, keyword): # df_columns: nparray of df_columns. k
             if j == keyword:
                 counts += 1
     return counts
+
+def nnPixelCorrect(arr, n_, d, bg_=0, plot_=True):
+    """
+    n_: value of noise pixel to correct
+    bg_: backgroud pixel value, default 0.
+    d: degree of neighbor
+    """
+    def sliding_window(arr, window_size):
+        """ Construct a sliding window view of the array"""
+        arr = np.asarray(arr)
+        window_size = int(window_size)
+        if arr.ndim != 2:
+            raise ValueError("need 2-D input")
+        if not (window_size > 0):
+            raise ValueError("need a positive window size")
+        shape = (arr.shape[0] - window_size + 1,
+                 arr.shape[1] - window_size + 1,
+                 window_size, window_size)
+        if shape[0] <= 0:
+            shape = (1, shape[1], arr.shape[0], shape[3])
+        if shape[1] <= 0:
+            shape = (shape[0], 1, shape[2], arr.shape[1])
+        strides = (arr.shape[1]*arr.itemsize, arr.itemsize,
+                   arr.shape[1]*arr.itemsize, arr.itemsize)
+        return as_strided(arr, shape=shape, strides=strides)
+
+    def cell_neighbors(arr, i, j, d):
+        """Return d-th neighbors of cell (i, j)"""
+        w = sliding_window(arr, 2*d+1)
+        ix = np.clip(i - d, 0, w.shape[0]-1)
+        jx = np.clip(j - d, 0, w.shape[1]-1)
+        i0 = max(0, i - d - ix)
+        j0 = max(0, j - d - jx)
+        i1 = w.shape[2] - max(0, d - i + ix)
+        j1 = w.shape[3] - max(0, d - j + jx)
+        return w[ix, jx][i0:i1, j0:j1].ravel()
+
+    def most_common(lst):
+        return max(set(lst), key=lst.count)
+    arr_ = copy.deepcopy(arr)
+    noiseIndices = np.where(arr == n_)
+    listOfCoordinates = list(zip(noiseIndices[0], noiseIndices[1]))
+    for coOrd in listOfCoordinates:
+        # print("noise ind: ", cord[0], cord[1])
+        cn = cell_neighbors(arr, coOrd[0], coOrd[1], d)
+        cn = np.delete(cn, np.where((cn == bg_) | (cn == n_)))
+        arr[coOrd[0], coOrd[1]] = most_common(cn.tolist())
+    if plot_:
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        arrays = [arr_, arr]
+        title = ['noisy', 'corrected']
+        fig, axs = plt.subplots(1, 2, figsize=(10, 8), dpi=200, sharex=False)
+        for ar, tl, ax in zip(arrays, title, axs.ravel()):
+            im = ax.imshow(ar) #, cmap='twilight') #cm)
+            ax.set_title(tl, fontsize=20)
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(im, cax=cax, ax=ax)
+        plt.show()
+    return arr
 
 if __name__ !='__main__':
     ## load data
@@ -591,22 +652,6 @@ if __name__ != '__main__':
     savecsv = os.path.join(oldCDir, '{}.csv'.format(exprun))
     pca_umap_hdbscan_gmm.to_csv(savecsv, index=False, sep=',')
 
-mspath = glob(os.path.join(oldCDir, '*.imzML'))[0]
-# print(mspath)
-dirname = os.path.dirname(mspath)
-basename = os.path.basename(mspath)
-filename, ext = os.path.splitext(basename)
-regID = 3
-# print(os.path.join(dirname, str(filename + '_reg_{}.mat'.format(regID))))
-
-ImzObj = IMZMLExtract(mspath)
-regInd = ImzObj.get_region_indices(regID)
-print(regInd)
-xr, yr, zr, _ = ImzObj.get_region_range(regID)
-print(xr, yr, zr, _)    # (704, 798) (146, 212) (1, 1) 1332
-xx, yy, _ = ImzObj.get_region_shape(regID)
-print(xx, yy, _)    # 95 67 1332
-
 def msmlfunc(mspath, regID, threshold, exprun_name=None):
     """
     mspath: path to .imzML file
@@ -619,6 +664,7 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
     plot_spec = True
     plot_pca = True
     plot_umap = True
+    save_rseg = False
     if exprun_name:
         exprun = exprun_name + '_' + TIME_STAMP
     else:
@@ -865,8 +911,8 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
 
     df_pca_umap.insert(df_pca_umap.shape[1], column='hdbscan_labels', value=labels)
     df_pca_umap_hdbscan = copy.deepcopy(df_pca_umap)
-    savecsv = os.path.join(dirname, '{}_reg_{}_{}.csv'.format(filename, regID, exprun))
-    df_pca_umap_hdbscan.to_csv(savecsv, index=False, sep=',')
+    # savecsv = os.path.join(dirname, '{}_reg_{}_{}.csv'.format(filename, regID, exprun))
+    # df_pca_umap_hdbscan.to_csv(savecsv, index=False, sep=',')
 
     # +--------------------------------------+
     # |   Segmentation on PCA+UMAP+HDBSCAN   |
@@ -875,18 +921,81 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
     xr, yr, zr, _ = ImzObj.get_region_range(regID)
     xx, yy, _ = ImzObj.get_region_shape(regID)
     sarray = np.zeros([xx, yy])
-    # labels[np.where(labels == 19)] = 0
     for idx, coord in enumerate(regInd):
         print(idx, coord, ImzObj.coord2index.get(coord))
         xpos = coord[0] - xr[0]
         ypos = coord[1] - yr[0]
-        sarray[xpos, ypos] = labels[idx] + 1
+        sarray[xpos, ypos] = labels[idx] + 1    # to avoid making 0 as bg
+    sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
     fig, ax = plt.subplots(figsize=(6, 8))
     sarrayIm = ax.imshow(sarray)
-    # cax = fig.add_axes([0.27, 0.8, 0.5, 0.05])
     fig.colorbar(sarrayIm)
     ax.set_title('reg{}: HDBSCAN labeling'.format(regID), fontsize=15, loc='center')
     plt.show()
-    namepy = os.path.join(dirname, '{}_reg_{}_{}.npy'.format(filename, regID, exprun))
-    np.save(namepy, sarray)
+    if save_rseg:
+        namepy = os.path.join(dirname, '{}_reg_{}_{}_hdbscan-label.npy'.format(filename, regID, exprun))
+        np.save(namepy, sarray)
+
+    # +-----------------+
+    # |       GMM       |
+    # +-----------------+
+    n_components = 5
+    span = 5
+    n_component = generate_nComponentList(n_components, span)
+    repeat = 2
+
+    for i in range(repeat):  # may repeat several times
+        for j in range(n_component.shape[0]):  # ensemble with different n_component value
+            StaTime = time.time()
+            gmm = GMM(n_components=n_component[j], max_iter=5000)  # max_iter does matter, no random seed assigned
+            labels = gmm.fit_predict(df_pca_umap.values) #todo data_umap
+            # save data
+            index = j + 1 + i * n_component.shape[0]
+            title = 'gmm_' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
+            # df_pixel_label[title] = labels
+
+            SpenTime = (time.time() - StaTime)
+
+            # progressbar
+            print('{}/{}, finish classifying {}, running time is: {} s'.format(index, repeat * span, title,
+                                        round(SpenTime, 2)))
+            df_pca_umap_hdbscan.insert(df_pca_umap_hdbscan.shape[1], column=title, value=labels)
+
+    df_pca_umap_hdbscan_gmm = copy.deepcopy(df_pca_umap_hdbscan)
+    # savecsv = os.path.join(dirname, '{}_reg_{}_{}.csv'.format(filename, regID, exprun)) # todo
+    # df_pca_umap_hdbscan_gmm.to_csv(savecsv, index=False, sep=',')
+
+    nGs = retrace_columns(df_pca_umap_hdbscan_gmm.columns.values, 'gmm')
+    df_gmm_labels = df_pca_umap_hdbscan_gmm.iloc[:, -nGs:]
+    print("gmm label: ", nGs)
+
+    for (columnName, columnData) in df_gmm_labels.iteritems():
+        print('Column Name : ', columnName)
+        print('Column Contents : ', columnData.values)
+
+        regInd = ImzObj.get_region_indices(regID)
+        xr, yr, zr, _ = ImzObj.get_region_range(regID)
+        xx, yy, _ = ImzObj.get_region_shape(regID)
+        sarray1 = np.zeros([xx, yy])
+        for idx, coord in enumerate(regInd):
+            xpos = coord[0] - xr[0]
+            ypos = coord[1] - yr[0]
+            sarray1[xpos, ypos] = columnData.values[idx] + 1
+        fig, ax = plt.subplots(figsize=(6, 8))
+        sarrayIm = ax.imshow(sarray1)
+        fig.colorbar(sarrayIm)
+        ax.set_title('reg{}: pca_{}'.format(regID, columnName), fontsize=15, loc='center') #todo 'umap'
+        plt.show()
     return
+
+posLip = r'/media/banikr2/DATA/MALDI/fromCardinal/PosLip'
+mspath = glob(os.path.join(posLip, '*.imzML'))[0]
+ImzObj = IMZMLExtract(mspath)
+print(mspath)
+
+regID = 3
+msmlfunc(mspath, regID=3, threshold=0.95, exprun_name='handle_outliar')
+
+
+
+

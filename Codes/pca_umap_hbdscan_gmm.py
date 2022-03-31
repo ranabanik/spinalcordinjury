@@ -5,6 +5,7 @@ from numpy.lib.stride_tricks import as_strided
 from imzml import IMZMLExtract, Binning2, normSpec, normalize_spectrum
 from scipy.io import savemat, loadmat
 import scipy.cluster.hierarchy as shc
+from scipy import ndimage, signal
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.decomposition import PCA
 from umap import UMAP
@@ -13,12 +14,22 @@ from sklearn.mixture import GaussianMixture as GMM
 import matplotlib as mtl
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider
 import plotly.express as px
 import seaborn as sns
 import pywt
 import pandas as pd
 import time
 import copy
+# from matplotlib import widget
+from IPython import get_ipython
+# %matplotlib inline
+# import matplotlib
+mtl.use('TkAgg')
+# mtl.use('GTK3Agg')
+
+
+# get_ipython().run_line_magic('matplotlib', 'inline')
 
 exprun_name = 'pca_umap_hdbscan_gmm_'
 TIME_STAMP = time.strftime('%Y-%m-%d-%H-%M-%S')
@@ -99,7 +110,7 @@ def chart(X, y):
     # Update marker size
     fig.update_traces(marker=dict(size=3, line=dict(color='black', width=0.1)))
     fig.show()
-def generate_nComponentList(n_class, span):
+def _generate_nComponentList(n_class, span):
     n_component = np.linspace(n_class-int(span/2), n_class+int(span/2), span).astype(int)
     return n_component
 def retrace_columns(df_columns, keyword): # df_columns: nparray of df_columns. keyword: str
@@ -112,6 +123,7 @@ def retrace_columns(df_columns, keyword): # df_columns: nparray of df_columns. k
     return counts
 def nnPixelCorrect(arr, n_, d, bg_=0, plot_=True):
     """
+    corrects the pixel value based on neighnoring pixels
     n_: value of noise pixel to correct
     bg_: backgroud pixel value, default 0.
     d: degree of neighbor
@@ -169,6 +181,14 @@ def nnPixelCorrect(arr, n_, d, bg_=0, plot_=True):
             fig.colorbar(im, cax=cax, ax=ax)
         plt.show()
     return arr
+def _smooth_spectrum(spectrum, method="savgol", window_length=5, polyorder=2):
+    assert (method in ["savgol", "gaussian"])
+    if method == "savgol":
+        outspectrum = signal.savgol_filter(spectrum, window_length=window_length, polyorder=polyorder, mode='nearest')
+    elif method == "gaussian":
+        outspectrum = ndimage.gaussian_filter1d(spectrum, sigma=window_length, mode='nearest')
+    outspectrum[outspectrum < 0] = 0
+    return outspectrum
 
 if __name__ !='__main__':
     ## load data
@@ -328,7 +348,10 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
     # +------------------------------+
     reg_norm = np.zeros_like(regSpec)
     for s in range(0, nSpecs):
-        reg_norm[s, :] = normalize_spectrum(regSpec[s, :], normalize='tic')
+        # reg_norm[s, :] = normalize_spectrum(regSpec[s, :], normalize='tic')
+        reg_norm_ = _smooth_spectrum(regSpec[s, :], method='savgol', window_length=7, polyorder=2)
+        reg_norm[s, :] = normalize_spectrum(reg_norm_, normalize='tic')
+
         # printStat(data_norm)
     reg_norm_ss = makeSS(reg_norm).astype(np.float64)
     # reg_norm_ss = StandardScaler().fit_transform(reg_norm)
@@ -575,14 +598,14 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
     # +-----------------+
     n_components = 5
     span = 5
-    n_component = generate_nComponentList(n_components, span)
+    n_component = _generate_nComponentList(n_components, span)
     repeat = 2
 
     for i in range(repeat):  # may repeat several times
         for j in range(n_component.shape[0]):  # ensemble with different n_component value
             StaTime = time.time()
             gmm = GMM(n_components=n_component[j], max_iter=5000)  # max_iter does matter, no random seed assigned
-            labels = gmm.fit_predict(data_umap) #todo data_umap
+            labels = gmm.fit_predict(data_umap)     #todo data_umap
             # save data
             index = j + 1 + i * n_component.shape[0]
             title = 'gmm_' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
@@ -596,7 +619,7 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
             df_pca_umap_hdbscan.insert(df_pca_umap_hdbscan.shape[1], column=title, value=labels)
 
     df_pca_umap_hdbscan_gmm = copy.deepcopy(df_pca_umap_hdbscan)
-    savecsv = os.path.join(dirname, '{}_reg_{}_{}.csv'.format(filename, regID, exprun)) # todo
+    savecsv = os.path.join(dirname, '{}_reg_{}_{}.csv'.format(filename, regID, exprun))     # todo
     df_pca_umap_hdbscan_gmm.to_csv(savecsv, index=False, sep=',')
 
     nGs = retrace_columns(df_pca_umap_hdbscan_gmm.columns.values, 'gmm')
@@ -606,7 +629,6 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
     for (columnName, columnData) in df_gmm_labels.iteritems():
         print('Column Name : ', columnName)
         print('Column Contents : ', columnData.values)
-
         regInd = ImzObj.get_region_indices(regID)
         xr, yr, zr, _ = ImzObj.get_region_range(regID)
         xx, yy, _ = ImzObj.get_region_shape(regID)
@@ -618,21 +640,139 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
         fig, ax = plt.subplots(figsize=(6, 8))
         sarrayIm = ax.imshow(sarray1)
         fig.colorbar(sarrayIm)
-        ax.set_title('reg{}: gmm_{}'.format(regID, columnName), fontsize=15, loc='center') #todo 'umap'
+        ax.set_title('reg{}: umap_{}'.format(regID, columnName), fontsize=15, loc='center')
         plt.show()
     return
 
-nSpecs = 3000
-nS = np.random.randint(nSpecs)
-print(">>", nS)
-posLip = r'/media/banikr2/DATA/MALDI/fromCardinal/PosLip'
+posLip = r'C:\Data\PosLip'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
-# ImzObj = IMZMLExtract(mspath)
 print(mspath)
 
-# regID = 3
-msmlfunc(mspath, regID=4, threshold=0.8, exprun_name='SScalar') # todo
+# msmlfunc(mspath, regID=1, threshold=0.95, exprun_name='sav_golay_norm')   # todo: change values
+imze = IMZMLExtract(mspath)
+spectra0_orig = imze.get_region_array(3, makeNullLine=False)
+# # spectra0_intra = imze.normalize_region_array(spectra0_orig, normalize="intra_median")
+# # spectra0 = imze.normalize_region_array(spectra0_intra, normalize="inter_median")
+# # print(spectra0_orig.shape, spectra0_intra.shape, spectra0.shape)
+# #
+# # # if plot_spec:
+# #
+nX = np.random.randint(spectra0_orig.shape[0])
+nY = np.random.randint(spectra0_orig.shape[1])
+print(nX, nY)
+# # # nS = np.random.randint(nSpecs)
+# # fig, ax = plt.subplots(3, 1, figsize=(16, 10), dpi=200)
+# # ax[0].plot(spectra0_orig[nX, nY, :])
+# # plt.title("raw spectrum")
+# # ax[1].plot(spectra0_intra[nX, nY, :])
+# # plt.title("'tic' norm")
+# # ax[2].plot(spectra0[nX, nY, :])
+# # plt.title("standardized")
+# # # ax[3].plot(np.mean(regSpec, axis=0))
+# # # plt.title("mean spectra(region {})".format(regID))
+# # # plt.suptitle("Processing comparison of Spec #{}".format(nS))
+# # plt.show()
+#
+#
 
+#
+# # imze.plot_fcs(spectra0_orig, [(5, 30), (10, 30), (20, 30), (25, 30), (35, 30), (40, 30)])
+nX = 90
+nY = 41
+refSpec = spectra0_orig[nX, nY, :]#[450:550]
+# refnorm = normalize_spectrum(refSpec, normalize='tic')
+smoothSpec_sav = _smooth_spectrum(refSpec, method='savgol', window_length=3, polyorder=2)
+# smoothSpec_gau = smooth_spectrum(refnorm, method='savgol', window_length=7, polyorder=2)
+# # # print(refSpec.shape, smoothSpec_sav.shape, smoothSpec_gau.shape)
+# fig = plt.figure()
+fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
+p = ax.plot(refSpec)
+# ax.set_title("raw spectrum")
+p, = ax.plot(smoothSpec_sav)
+# ax[1].set_title("savgol 1")
+# ax[2].plot(smoothSpec_gau)
+# ax[2].set_title("savgol 2")
+plt.subplots_adjust(bottom=0.25)
+ax_slide = plt.axes([0.25, 0.1, 0.65, 0.03])
+win_len = Slider(ax_slide, 'window length', valmin=5, valmax=99, valinit=99, valstep=2)
+def update(val):
+    current_v = int(win_len.val)
+    smoothSpec_sav = _smooth_spectrum(refSpec, method='savgol', window_length=current_v, polyorder=3)
+    p.set_ydata(smoothSpec_sav)
+    fig.canvas.draw()
+win_len.on_changed(update)
+plt.show()
+# #
+# ref_fft = np.fft.fft(refnorm) #, len(refSpec))
+# # psd = ref_fft * np.conj(ref_fft)/len(refSpec)
+# # print(ref_fft)
+# #
+# fig, ax = plt.subplots(2, 1, figsize=(16, 10), dpi=200)
+# ax[0].plot(refSpec)
+# ax[0].set_title("raw spectrum")
+# ax[1].plot(abs(ref_fft))
+# ax[1].set_title("FFT")
+# plt.show()
+#
+# # ref_ifft = np.fft.ifft(ref_fft)
+# # # print(ref_ifft)
+# # fig, ax = plt.subplots(3, 1, figsize=(16, 10), dpi=200)
+# # ax[0].plot(refSpec)
+# # ax[0].set_title("raw spectrum")
+# # ax[1].plot(abs(ref_fft))
+# # ax[1].set_title("FFT")
+# # ax[2].plot(abs(ref_ifft))
+# # ax[2].set_title("iFFT")
+# # plt.show()
+# peakind = signal.find_peaks_cwt(refSpec, np.arange(1, 10))
+# print(peakind, peakind.shape)
+# plt.plot(peakind)
+# plt.show()
 
-
-
+# from ipywidgets import widgets
+# from matplotlib.widgets import Slider, Button, RadioButtons
+# # %matplotlib inline
+#
+# fig, ax = plt.subplots()
+# plt.subplots_adjust(left=0.25, bottom=0.25)
+# t = np.arange(0.0, 1.0, 0.001)
+# a0 = 5
+# f0 = 3
+# delta_f = 5.0
+# s = a0 * np.sin(2 * np.pi * f0 * t)
+# l, = plt.plot(t, s, lw=2)
+# ax.margins(x=0)
+#
+# axcolor = 'lightgoldenrodyellow'
+# axfreq = plt.axes([0.25, 0.1, 0.65, 0.03], facecolor=axcolor)
+# axamp = plt.axes([0.25, 0.15, 0.65, 0.03], facecolor=axcolor)
+#
+# sfreq = Slider(axfreq, 'Freq', 0.1, 30.0, valinit=f0, valstep=delta_f)
+# samp = Slider(axamp, 'Amp', 0.1, 10.0, valinit=a0)
+#
+# def update(val):
+#     amp = samp.val
+#     freq = sfreq.val
+#     l.set_ydata(amp*np.sin(2*np.pi*freq*t))
+#     fig.canvas.draw_idle()
+#
+# sfreq.on_changed(update)
+# samp.on_changed(update)
+#
+# resetax = plt.axes([0.8, 0.025, 0.1, 0.04])
+# button = Button(resetax, 'Reset', color=axcolor, hovercolor='0.975')
+#
+# def reset(event):
+#     sfreq.reset()
+#     samp.reset()
+# button.on_clicked(reset)
+#
+# rax = plt.axes([0.025, 0.5, 0.15, 0.15], facecolor=axcolor)
+# radio = RadioButtons(rax, ('red', 'blue', 'green'), active=0)
+#
+# def colorfunc(label):
+#     l.set_color(label)
+#     fig.canvas.draw_idle()
+# radio.on_clicked(colorfunc)
+# # matplotlib inline
+# plt.show()

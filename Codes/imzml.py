@@ -660,21 +660,14 @@ class IMZMLExtract:
         plt.show()
         plt.close()
 
-
-
     def smooth_spectrum(self, spectrum, method="savgol", window_length=5, polyorder=2):
-        assert (method in ["savgol", "gaussian"])
-
-        
+        assert (method in ["savgol", "gaussian"]) #todo: try this in the pipeline
         if method=="savgol":
             outspectrum = signal.savgol_filter(spectrum, window_length=window_length, polyorder=polyorder, mode='nearest')
         elif method=="gaussian":
             outspectrum = ndimage.gaussian_filter1d(spectrum, sigma=window_length, mode='nearest')
-
         outspectrum[outspectrum < 0] = 0
-
         return outspectrum
-
 
     def smooth_region_array(self, region_array, method="savgol", window_length=5, polyorder=2):
         

@@ -3,7 +3,7 @@ import math
 import logging
 import json
 import os,sys
-from pIMZ.regions import SpectraRegion
+from regions import SpectraRegion
 import random
 from collections import defaultdict, Counter
 import glob
@@ -15,11 +15,9 @@ import pandas as pd
 
 import numpy as np
 from numpy.ctypeslib import ndpointer
-
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
 import ms_peak_picker
 import regex as re
-
 
 # image
 import skimage
@@ -30,7 +28,6 @@ from adjustText import adjust_text
 import ctypes
 import subprocess
 import dill as pickle
-
 
 #vis
 import dabest
@@ -63,22 +60,18 @@ import progressbar
 
 
 class CombinedSpectra():
-    """CombinedSpectra class for a combined analysis of several spectra regions.
     """
-
+    CombinedSpectra class for a combined analysis of several spectra regions.
+    """
     def __setlogger(self):
         """Sets up logging facilities for CombinedSpectra.
         """
         self.logger = logging.getLogger('CombinedSpectra')
-
         if len(self.logger.handlers) == 0:
             self.logger.setLevel(logging.INFO)
-
             consoleHandler = logging.StreamHandler()
             consoleHandler.setLevel(logging.INFO)
-
             self.logger.addHandler(consoleHandler)
-
             formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
             consoleHandler.setFormatter(formatter)
 
@@ -98,26 +91,20 @@ class CombinedSpectra():
         self.regions = {}
         self.consensus_similarity_matrix = None
         self.region_cluster2cluster = None
-
         self.region_array_scaled = {}
         self.de_results_all = defaultdict(lambda: dict())
         self.df_results_all = defaultdict(lambda: dict())
-
         self.logger = None
         self.__setlogger()
 
         for x in regions:
-            
             addregion = regions[x]
             if addregion.name == None:
                 addregion.name = x
-
             self.regions[addregion.name] = regions[x]
-
 
     def __get_spectra_similarity(self, vA, vB):
         """Calculates cosine similarity between two vectors of the same length.
-
         Args:
             vA (numpy.array/list): First vector.
             vB (numpy.array/list): Second vector.
@@ -125,8 +112,7 @@ class CombinedSpectra():
         Returns:
             float: cosine similarity.
         """
-        return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
-
+        return np.dot(vA, vB) / (np.sqrt(np.dot(vA, vA)) * np.sqrt(np.dot(vB, vB)))
 
     def consensus_similarity(self):        
         """
@@ -135,9 +121,7 @@ class CombinedSpectra():
 
         If the object was not yet scaled, it will get scaled.
         """
-
         self.check_scaled()
-
         allConsSpectra = {}
 
         for regionName in self.region_array_scaled:
@@ -184,7 +168,7 @@ class CombinedSpectra():
         # Calculate the distance between each sample
         Z = spc.hierarchy.linkage(df.values, 'ward')
 
-        plt.figure(figsize=(8,8))
+        plt.figure(figsize=(8, 8))
         # Make the dendro
         spc.hierarchy.dendrogram(Z, labels=df.columns.values, leaf_rotation=0, orientation="left", color_threshold=240, above_threshold_color='grey')
 

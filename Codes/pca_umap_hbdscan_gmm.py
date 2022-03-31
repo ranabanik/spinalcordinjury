@@ -25,7 +25,7 @@ import copy
 from IPython import get_ipython
 # %matplotlib inline
 # import matplotlib
-mtl.use('TkAgg')
+# mtl.use('TkAgg')
 # mtl.use('GTK3Agg')
 
 
@@ -644,135 +644,8 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
         plt.show()
     return
 
-posLip = r'C:\Data\PosLip'
+posLip = r'/media/banikr2/DATA/MALDI/fromCardinal/PosLip'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
-# msmlfunc(mspath, regID=1, threshold=0.95, exprun_name='sav_golay_norm')   # todo: change values
-imze = IMZMLExtract(mspath)
-spectra0_orig = imze.get_region_array(3, makeNullLine=False)
-# # spectra0_intra = imze.normalize_region_array(spectra0_orig, normalize="intra_median")
-# # spectra0 = imze.normalize_region_array(spectra0_intra, normalize="inter_median")
-# # print(spectra0_orig.shape, spectra0_intra.shape, spectra0.shape)
-# #
-# # # if plot_spec:
-# #
-nX = np.random.randint(spectra0_orig.shape[0])
-nY = np.random.randint(spectra0_orig.shape[1])
-print(nX, nY)
-# # # nS = np.random.randint(nSpecs)
-# # fig, ax = plt.subplots(3, 1, figsize=(16, 10), dpi=200)
-# # ax[0].plot(spectra0_orig[nX, nY, :])
-# # plt.title("raw spectrum")
-# # ax[1].plot(spectra0_intra[nX, nY, :])
-# # plt.title("'tic' norm")
-# # ax[2].plot(spectra0[nX, nY, :])
-# # plt.title("standardized")
-# # # ax[3].plot(np.mean(regSpec, axis=0))
-# # # plt.title("mean spectra(region {})".format(regID))
-# # # plt.suptitle("Processing comparison of Spec #{}".format(nS))
-# # plt.show()
-#
-#
-
-#
-# # imze.plot_fcs(spectra0_orig, [(5, 30), (10, 30), (20, 30), (25, 30), (35, 30), (40, 30)])
-nX = 90
-nY = 41
-refSpec = spectra0_orig[nX, nY, :]#[450:550]
-# refnorm = normalize_spectrum(refSpec, normalize='tic')
-smoothSpec_sav = _smooth_spectrum(refSpec, method='savgol', window_length=3, polyorder=2)
-# smoothSpec_gau = smooth_spectrum(refnorm, method='savgol', window_length=7, polyorder=2)
-# # # print(refSpec.shape, smoothSpec_sav.shape, smoothSpec_gau.shape)
-# fig = plt.figure()
-fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
-p = ax.plot(refSpec)
-# ax.set_title("raw spectrum")
-p, = ax.plot(smoothSpec_sav)
-# ax[1].set_title("savgol 1")
-# ax[2].plot(smoothSpec_gau)
-# ax[2].set_title("savgol 2")
-plt.subplots_adjust(bottom=0.25)
-ax_slide = plt.axes([0.25, 0.1, 0.65, 0.03])
-win_len = Slider(ax_slide, 'window length', valmin=5, valmax=99, valinit=99, valstep=2)
-def update(val):
-    current_v = int(win_len.val)
-    smoothSpec_sav = _smooth_spectrum(refSpec, method='savgol', window_length=current_v, polyorder=3)
-    p.set_ydata(smoothSpec_sav)
-    fig.canvas.draw()
-win_len.on_changed(update)
-plt.show()
-# #
-# ref_fft = np.fft.fft(refnorm) #, len(refSpec))
-# # psd = ref_fft * np.conj(ref_fft)/len(refSpec)
-# # print(ref_fft)
-# #
-# fig, ax = plt.subplots(2, 1, figsize=(16, 10), dpi=200)
-# ax[0].plot(refSpec)
-# ax[0].set_title("raw spectrum")
-# ax[1].plot(abs(ref_fft))
-# ax[1].set_title("FFT")
-# plt.show()
-#
-# # ref_ifft = np.fft.ifft(ref_fft)
-# # # print(ref_ifft)
-# # fig, ax = plt.subplots(3, 1, figsize=(16, 10), dpi=200)
-# # ax[0].plot(refSpec)
-# # ax[0].set_title("raw spectrum")
-# # ax[1].plot(abs(ref_fft))
-# # ax[1].set_title("FFT")
-# # ax[2].plot(abs(ref_ifft))
-# # ax[2].set_title("iFFT")
-# # plt.show()
-# peakind = signal.find_peaks_cwt(refSpec, np.arange(1, 10))
-# print(peakind, peakind.shape)
-# plt.plot(peakind)
-# plt.show()
-
-# from ipywidgets import widgets
-# from matplotlib.widgets import Slider, Button, RadioButtons
-# # %matplotlib inline
-#
-# fig, ax = plt.subplots()
-# plt.subplots_adjust(left=0.25, bottom=0.25)
-# t = np.arange(0.0, 1.0, 0.001)
-# a0 = 5
-# f0 = 3
-# delta_f = 5.0
-# s = a0 * np.sin(2 * np.pi * f0 * t)
-# l, = plt.plot(t, s, lw=2)
-# ax.margins(x=0)
-#
-# axcolor = 'lightgoldenrodyellow'
-# axfreq = plt.axes([0.25, 0.1, 0.65, 0.03], facecolor=axcolor)
-# axamp = plt.axes([0.25, 0.15, 0.65, 0.03], facecolor=axcolor)
-#
-# sfreq = Slider(axfreq, 'Freq', 0.1, 30.0, valinit=f0, valstep=delta_f)
-# samp = Slider(axamp, 'Amp', 0.1, 10.0, valinit=a0)
-#
-# def update(val):
-#     amp = samp.val
-#     freq = sfreq.val
-#     l.set_ydata(amp*np.sin(2*np.pi*freq*t))
-#     fig.canvas.draw_idle()
-#
-# sfreq.on_changed(update)
-# samp.on_changed(update)
-#
-# resetax = plt.axes([0.8, 0.025, 0.1, 0.04])
-# button = Button(resetax, 'Reset', color=axcolor, hovercolor='0.975')
-#
-# def reset(event):
-#     sfreq.reset()
-#     samp.reset()
-# button.on_clicked(reset)
-#
-# rax = plt.axes([0.025, 0.5, 0.15, 0.15], facecolor=axcolor)
-# radio = RadioButtons(rax, ('red', 'blue', 'green'), active=0)
-#
-# def colorfunc(label):
-#     l.set_color(label)
-#     fig.canvas.draw_idle()
-# radio.on_clicked(colorfunc)
-# # matplotlib inline
-# plt.show()
+msmlfunc(mspath, regID=1, threshold=0.95, exprun_name='sav_golay_norm')   # todo: change values

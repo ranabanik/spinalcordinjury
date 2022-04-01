@@ -603,7 +603,7 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
     return
 
 # posLip = r'/media/banikr2/DATA/MALDI/210427_Chen_pos_lipid' #
-posLip = r'/media/banikr2/DATA/MALDI/fromCardinal/PosLip'
+posLip = r'C:\Data\PosLip'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
@@ -640,7 +640,7 @@ if __name__ != '__main__':
 # +------------------------------------------------+
 # |     undecimated discreet wavelet denoising     |
 # +------------------------------------------------+
-if __name__ != '__main__':
+if __name__ == '__main__':
     def madev(d, axis=None):
         """ Mean absolute deviation of a signal """
         return np.mean(np.absolute(d - np.mean(d, axis)), axis)
@@ -652,32 +652,45 @@ if __name__ != '__main__':
         coeff[1:] = (pywt.threshold(i, value=uthresh, mode='hard') for i in coeff[1:])
         return pywt.waverec(coeff, wavelet, mode='per')
 
-    # signal = data[nS, :]
+    nX = 90
+    nY = 41
+    signal = spectra0_orig[nX, nY, :][200:400]
 
-    for wav in pywt.wavelist():
-        print(wav)
-        # try:
-        #     filtered = wavelet_denoising(signal, wavelet=wav, level=1)
-        # except:
-        #     pass
+    # for wav in pywt.wavelist():
+    #     print(wav)
+    #     try:
+    #         filtered = wavelet_denoising(signal, wavelet=wav, level=1)
+    #     except:
+    #         pass
 
     filtered = wavelet_denoising(signal, wavelet='bior4.4')
     plt.figure(figsize=(10, 6))
     plt.plot(signal, label='Raw')
     plt.plot(filtered, label='Filtered')
     plt.legend()
-    plt.title(f"DWT Denoising with {wav} Wavelet", size=15)
+    plt.title(f"DWT Denoising with Wavelet", size=15)
     plt.show()
+    #
+    # fig, ax = plt.subplots(2, 1, figsize=(20, 8), dpi=200)
+    # # plt.subplot(411)
+    # ax[0].plot(signal)
+    # plt.title("raw")
+    # # plt.subplot(412)
+    # ax[1].plot(filtered)
+    # plt.title("filtered")
+    # plt.show()
+    # print(np.min(filtered))
 
-    fig, ax = plt.subplots(2, 1, figsize=(20, 8), dpi=200)
-    # plt.subplot(411)
-    ax[0].plot(signal)
-    plt.title("raw")
-    # plt.subplot(412)
-    ax[1].plot(filtered)
-    plt.title("filtered")
-    plt.show()
-    print(np.min(filtered))
+if __name__ != '__main__':
+    wavelet = 'bior4.4'
+    nX = 90  # np.random.randint(spectra0_orig.shape[0])
+    nY = 41  # np.random.randint(spectra0_orig.shape[1])
+    # print(nX, nY)
+
+    data_wt = pywt.dwt(refSpec, wavelet, mode='symmetric', axis=-1)
+    # plt.plot(data_wt)
+    # plt.show()
+    print(np.array(data_wt).shape)
 
 # +---------------------------+
 # |      ms_peak_picker       |
@@ -710,57 +723,3 @@ if __name__ != '__main__':
     # plt.hlines(y=properties["width_heights"], xmin=properties["left_ips"],
     #            xmax=properties["right_ips"], color="C1")
     plt.show()
-
-class MaldiTofSpectrum(np.ndarray):
-    """Numpy NDArray subclass representing a MALDI-TOF Spectrum."""
-    def __new__(cls, peaks):
-        """Create a MaldiTofSpectrum.
-        Args:
-            peaks: 2d array or list of tuples or list of list containing pairs
-                of mass/charge to intensity.
-        Raises:
-            ValueError: If the input data is not in the correct format.
-        """
-        peaks = np.asarray(peaks).view(cls)
-        if peaks.ndim != 2 or peaks.shape[1] != 2:
-            raise ValueError(
-                f'Input shape of {peaks.shape} does not match expected shape '
-                'for spectrum [n_peaks, 2].'
-            )
-        return peaks
-
-    @property
-    def n_peaks(self):
-        """Get number of peaks of the spectrum."""
-        return self.shape[0]
-
-    @property
-    def intensities(self):
-        """Get the intensities of the spectrum."""
-        return self[:, 1]
-
-    @property
-    def mass_to_charge_ratios(self):
-        """Get mass-t0-charge ratios of spectrum."""
-        return self[:, 0]
-
-MOCK_DATA = [
-    MaldiTofSpectrum(
-        [[0.0,   5.0],
-         [10.7,  8.0],
-         [150.4, 10.],
-         [1000,  3.0]
-         ]
-    ),  # Mean intensity 6.5
-    MaldiTofSpectrum(
-        [[0.0,   15.0],
-         [10.7,  0.0],
-         [150.4, 10.],
-         [1000,  3.0]
-         ]
-    ),  # Mean intensity 7 or 9.3333 (with ignore zero intensity)
-]
-print(MOCK_DATA[0].shape, MOCK_DATA[0].n_peaks, MOCK_DATA[0].mass_to_charge_ratios)
-
-# MD = MaldiTofSpectrum(MOCK_DATA)
-# print(MD)

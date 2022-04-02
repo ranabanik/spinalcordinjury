@@ -1716,57 +1716,6 @@ class Binning(object):
         return binned_spectrum
 
 # updated after Cardinal: peakpicked
-class Binning2(object):
-    """
-    given the imze object should create 3D matrix(spatial based) or 2D(spectrum based)
-    spectrum: array with 2 vectors, one of abundance(1), other with m/z values(0)
-    n_bins: number of bins/samples to be digitized
-    plotspec: to plot the new binned spectrum, default--> True
-    """
-
-    def __init__(self, imzObj, regionID, plotspec=False):
-        self.imzObj = imzObj
-        self.regionID = regionID
-        self.n_bins = len(imzObj.mzValues) + 1
-        self.plotspec = plotspec
-        self.xr, self.yr, self.zr, _ = self.imzObj.get_region_range(regionID)
-        self.imzeShape = [self.xr[1] - self.xr[0] + 1,
-                          self.yr[1] - self.yr[0] + 1, self.n_bins - 1]
-
-    def getBinMat(self):
-        sarray = np.zeros(self.imzeShape, dtype=np.float32)
-        regInd = self.imzObj.get_region_indices(self.regionID)
-        binned_mat = np.zeros([len(regInd), self.n_bins - 1])
-        coordList = []
-        #         xr, yr, zr, _ = self.imzObj.get_region_range(regionID)
-        #         self.imzeShape = [xr[1]-xr[0]+1,
-        #                  yr[1]-yr[0]+1, self.n_bins -1]
-        for i, coord in enumerate(regInd):
-            spectrum = self.imzObj.parser.getspectrum(self.imzObj.coord2index.get(coord))  # [0]
-            bSpec = self.onebinning(spectrum)
-            binned_mat[i] = bSpec
-            xpos = coord[0] - self.xr[0]
-            ypos = coord[1] - self.yr[0]
-            sarray[xpos, ypos, :] = bSpec
-            coordList.append(coord)
-        return sarray, binned_mat, coordList
-
-    def onebinning(self, spectrum):
-        """
-        returns: binned_spectrum
-        """
-        bins = np.linspace(spectrum[0][0], spectrum[0][-1], num=self.n_bins, endpoint=True)
-        hist = np.histogram(spectrum[0], bins=bins)
-        binned_spectrum = np.zeros_like(hist[0])
-        hstart = 0
-        for i in range(len(hist[0])):
-            binned_spectrum[i] = np.sum(spectrum[1][hstart:hstart + hist[0][i]])
-            hstart = hstart + hist[0][i]
-        if self.plotspec:
-            plt.plot(bins[1:], binned_spectrum)
-            plt.show()
-        return binned_spectrum
-
 
 class Binning3(object):
     """

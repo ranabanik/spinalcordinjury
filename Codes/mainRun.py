@@ -1,211 +1,145 @@
 import os
+import copy
 from glob import glob
 import numpy as np
-from scipy.io import savemat, loadmat
-from matplotlib.widgets import Slider
-from Utilities import Binning2
-from imzml import IMZMLExtract, normSpec, normalize_spectrum
-import seaborn as sns
 import pywt
-import pandas as pd
-import time
-import copy
-from IPython import get_ipython
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider
 import matplotlib as mtl
-mtl.use('TkAgg')
-# mtl.use('GTK3Agg')
+mtl.use('TkAgg')    # required for widget slider...
+from Utilities import bestWvltForRegion
+from Utilities import downSpatMS, msmlfunc2, msmlfunc, matchSpecLabel
+from scipy.io import loadmat
+import time
 
-# get_ipython().run_line_magic('matplotlib', 'inline')
+from tqdm import tqdm
+import pickle
+from imzml import IMZMLExtract, normalize_spectrum
 
-exprun_name = 'pca_umap_hdbscan_gmm_'
+exprun_name = 'down_ml'
 TIME_STAMP = time.strftime('%Y-%m-%d-%H-%M-%S')
 if exprun_name:
     exprun = exprun_name + TIME_STAMP
 else:
     exprun = TIME_STAMP
-
-print(exprun)
-
+# print(exprun)
 RandomState = 20210131
 
-oldCDir = r'C:\Data\PosLip'
-
-def printStat(data):
-    data = np.array(data)
-    return print("Max:{:.4f},  Min:{:.4f},  Mean:{:.4f},  Std:{:.4f}".format(np.max(data), np.min(data), np.mean(data), np.std(data)))
-
-
-
-
-if __name__ !='__main__':
-    ## load data
-    oldCFile = glob(os.path.join(oldCDir, '*.imzML'))
-    print(oldCFile[0])
-    oldCImz = IMZMLExtract(oldCFile[0])
-    ##
-    regionID = 1
-    oldLipidObj = Binning2(oldCImz, 1)
-    oldLipid1 = oldLipidObj.getBinMat()
-    nSpecs, nBins = oldLipid1[1].shape
-    print("There are {} spectrums and {} m/z bins".format(nSpecs, nBins))
-    matr = {"data": oldLipid1[1], "label": "region 1(only spectras)"}
-    savemat(os.path.join(oldCDir, 'oldLipid1.mat'), matr)
-
-## read data
-if __name__ != '__main__':
-    datapath = glob(os.path.join(oldCDir, 'oldLipid1.mat'))
-    print(datapath[0])
-    data_obj = loadmat(datapath[0])
-    print(sorted(data_obj.keys()))
-
-    data = data_obj['data']
-    print(data.shape)
-    nSpecs, nBins = data.shape
-    printStat(data)
-
-# +-------------------+
-# |   standardize     |
-# +-------------------+
-if __name__ != '__main__':
-    ## min max normalization
-    # normScaler = MinMaxScaler()
-    #     # data_norm = normScaler.fit_transform(data)
-    #     # printStat(data_norm)
-    # data_norm = data
-
-    data_norm = np.zeros_like(data)
-    for s in range(0, nSpecs):
-        data_norm[s, :] = normalize_spectrum(data[s, :], normalize='tic')
-    printStat(data_norm)
-
-    ## standardization
-    # stanScaler = StandardScaler(with_mean=True, with_std=True)
-    # data_norm_ss = stanScaler.fit_transform(data_norm)
-    data_norm_ss = makeSS(data_norm)
-    print("Standardized stat: ")
-    printStat(data_norm_ss)
-    data = pd.DataFrame(data_norm_ss)
-    pixel_feature = data.values.astype(np.float64)
-    print("Pixel feature: ")
-    printStat(pixel_feature)
-
-# +------------------------------------------------+
-# | how many clusters?                             |
-# | >> according to the dendogram on norm_ss data  |
-# | there are 3/4 clusters in region 1             |
-# +------------------------------------------------+
-if __name__ != '__main__':
-    plt.figure(figsize=(10, 7))
-    plt.title("Dendograms: Positive Lipid 1(Min-Max scaled)")
-    dend = shc.dendrogram(shc.linkage(data_norm_ss, method='ward'))
-    plt.show()
-
-# +---------------+
-# |   tree plots  |
-# +---------------+
-# if __name__ != '__main__':
-#     clusterer.single_linkage_tree_.plot(cmap='viridis', colorbar=True)
-#     plt.show()
-#     clusterer.condensed_tree_.plot()
-#     plt.show()
-#     clusterer.condensed_tree_.plot(select_clusters=True, selection_palette=sns.color_palette())
-#     plt.show()
-
-
-
-# posLip = r'/media/banikr2/DATA/MALDI/210427_Chen_pos_lipid' #
 posLip = r'C:\Data\PosLip'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
-# msmlfunc(mspath, regID=1, threshold=0.95, exprun_name='sav_golay_norm')   # todo: change values
+# ImzObj = IMZMLExtract(mspath)
+# regID = 3
+# regname = os.path.join(posLip, '{}_reg_{}.mat'.format(posLip, regID))
+# BinObj = Binning2(ImzObj, 3)
+# regArr, regSpec, spCoo = BinObj.getBinMat()
+reg1_path = r'C:\Data\PosLip\reg_1'
+reg2_path = r'C:\Data\PosLip\reg_2'
+reg3_path = r'C:\Data\PosLip\reg_3'
+reg3_down = r'C:\Data\PosLip\reg_3\down_2'
+
+spectra_obj1 = loadmat(glob(os.path.join(reg1_path, '*reg_1.mat'))[0])
+spectra_obj2 = loadmat(glob(os.path.join(reg2_path, '*reg_2.mat'))[0])
+spectra_obj3 = loadmat(glob(os.path.join(reg3_path, '*reg_3.mat'))[0])
+# print(spectra_obj3.keys())
+
+spec_array1 = spectra_obj1['array']
+spec_data1 = spectra_obj1['spectra']
+spec_coor1 = spectra_obj1['coordinates']
+
+spec_array2 = spectra_obj2['array']
+spec_data2 = spectra_obj2['spectra']
+spec_coor2 = spectra_obj2['coordinates']
+
+spec_array3 = spectra_obj3['array']
+spec_data3 = spectra_obj3['spectra']
+spec_coor3 = spectra_obj3['coordinates']
+# print(spec_coor1, '\n', spec_coor3)
+# downArray, downSpec, downCoor = downSpatMS(spec_array3, 2, [2, 2, 1])
+
+# print(spectra_obj1.keys())
+
+
+# msmlfunc(mspath, regID=1, threshold=0.95, exprun='w_wvlt')
+# msmlfunc2(posLip, spec_array, spec_data, spec_coor, 3, 0.95, 'array_ml')
+from Utilities import msmlfunc3
+# msmlfunc3(mspath, regID=5, threshold=0.95, exprun='msml_v3', downsamp_i=None)
+
+
+# msmlfunc2(posLip, downArray, downSpec, downCoor, 3, 0.95, 'down_ml')
+
+seg1_path = glob(os.path.join(reg1_path, '*6_3_1.npy'))[0]
+seg2_path = glob(os.path.join(reg2_path, '*6_3_1.npy'))[0] #*hdbscan-label.npy
+seg3_path = glob(os.path.join(reg3_path, '*6_3_1.npy'))[0]
+seg3_down = glob(os.path.join(reg3_down, '*6_3_1.npy'))[0]
+
+from Utilities import matchSpecLabel_
+matchSpecLabel_(True, seg1_path, seg2_path, seg3_path, arr1=spec_array1,
+                                                       arr2=spec_array2,
+                                                       arr3=spec_array3)
+
+
 
 if __name__ != '__main__':
-    imze = IMZMLExtract(mspath)
-    spectra0_orig = imze.get_region_array(3, makeNullLine=True)
+    # wvltList = pywt.wavelist()
+    # print(len(wvltList))
+    # print(wvltList[23])
+    # print(pywt.families())
+    # for family in pywt.families():
+    #     print(family, ' : ', pywt.wavelist(family))
 
+    fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
+    p = ax.plot(signal)
+    # outspectrum = _smooth_spectrum(refSpec, method='savgol', window_length=wl_, polyorder=po_)
+    filtered = wavelet_denoising(signal, wavelet=discreteWvList[2]) #'bior4.4')
+    p, = ax.plot(filtered)
+    plt.subplots_adjust(bottom=0.25)
+    ax_slide = plt.axes([0.25, 0.1, 0.65, 0.03])
+    wvlt = Slider(ax_slide, 'wavelet', valmin=0, valmax=len(discreteWvList)-1, valinit=0, valstep=1)
+    print(wvlt.val)
+    def update(val):
+        current_wvlt = int(wvlt.val)
+        print(discreteWvList[current_wvlt])
+        filtered = wavelet_denoising(signal, wavelet=discreteWvList(current_wvlt))  # 'bior4.4')
+        p.set_ydata(filtered)
+        fig.canvas.draw()
+    # #     outspectrum = _smooth_spectrum(refSpec, method='savgol', window_length=current_v, polyorder=po_)
+    wvlt.on_changed(update)
+    plt.show()
+# +-------------------+
+# |   standardize     |
+# +-------------------+
 # +---------------------------+
 # |   demonstrate smoothing   |
 # +---------------------------+
 if __name__ != '__main__':
-    nX = 90  # np.random.randint(spectra0_orig.shape[0])
-    nY = 41  # np.random.randint(spectra0_orig.shape[1])
-    print(nX, nY)
-    refSpec = spectra0_orig[nX, nY, :]
+    nS = np.random.randint(spectra_array.shape[0])
+    signal = copy.deepcopy(spectra_array[nS, :])
     fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
-    p = ax.plot(refSpec)
+    p = ax.plot(signal, color=(0.9, 0, 0), linewidth=1.0, label='raw')
     wl_ = 3  # todo: 5 is better
     po_ = 2
-    outspectrum = _smooth_spectrum(refSpec, method='savgol', window_length=wl_, polyorder=po_)
-    p, = ax.plot(outspectrum)
+    outspectrum = _smooth_spectrum(signal, method='savgol', window_length=wl_, polyorder=po_)
+    p, = ax.plot(outspectrum, color=(0, 0, 1), linewidth=1.0, label='filtered', alpha=0.5)
     plt.subplots_adjust(bottom=0.25)
+    ax.set_xlabel("m/z(shifted)", fontsize=12)
+    ax.set_ylabel("intensity", fontsize=12)
+    ax.legend(loc='upper right')
+    fig.suptitle('Savitzky-Golay filtering', fontsize=12, y=1, fontweight='bold')
     ax_slide = plt.axes([0.25, 0.1, 0.65, 0.03])
     win_len = Slider(ax_slide, 'window length', valmin=wl_, valmax=99, valinit=99, valstep=2)
     def update(val):
         current_v = int(win_len.val)
-        outspectrum = _smooth_spectrum(refSpec, method='savgol', window_length=current_v, polyorder=po_)
+        #     try:
+        #         filtered = wavelet_denoising(signal, wavelet=wav, level=1)
+        #     except:
+        #         pass
+        outspectrum = _smooth_spectrum(signal, method='savgol', window_length=current_v, polyorder=po_)
         p.set_ydata(outspectrum)
         fig.canvas.draw()
     win_len.on_changed(update)
     plt.show()
-
-# +------------------------------------------------+
-# |     undecimated discreet wavelet denoising     |
-# +------------------------------------------------+
-if __name__ == '__main__':
-    def madev(d, axis=None):
-        """ Mean absolute deviation of a signal """
-        return np.mean(np.absolute(d - np.mean(d, axis)), axis)
-
-    def wavelet_denoising(x, wavelet='bior4.4', level=2):
-        coeff = pywt.wavedec(x, wavelet, mode="per")
-        sigma = (1/0.6745) * madev(coeff[-level])
-        uthresh = sigma * np.sqrt(2 * np.log(len(x)))
-        coeff[1:] = (pywt.threshold(i, value=uthresh, mode='hard') for i in coeff[1:])
-        return pywt.waverec(coeff, wavelet, mode='per')
-
-    nX = 90
-    nY = 41
-    signal = spectra0_orig[nX, nY, :][200:400]
-
-    # for wav in pywt.wavelist():
-    #     print(wav)
-    print(pywt.wavelist())
-    # todo: run all wavelet simulation ...
-
-    #     try:
-    #         filtered = wavelet_denoising(signal, wavelet=wav, level=1)
-    #     except:
-    #         pass
-
-    filtered = wavelet_denoising(signal, wavelet='bior4.4')
-    # plt.figure(figsize=(10, 6))
-    # plt.plot(signal, label='Raw')
-    # plt.plot(filtered, label='Filtered')
-    # plt.legend()
-    # plt.title(f"DWT Denoising with Wavelet", size=15)
-    # plt.show()
-    #
-    # fig, ax = plt.subplots(2, 1, figsize=(20, 8), dpi=200)
-    # # plt.subplot(411)
-    # ax[0].plot(signal)
-    # plt.title("raw")
-    # # plt.subplot(412)
-    # ax[1].plot(filtered)
-    # plt.title("filtered")
-    # plt.show()
-    # print(np.min(filtered))
-
-if __name__ != '__main__':
-    wavelet = 'bior4.4'
-    nX = 90  # np.random.randint(spectra0_orig.shape[0])
-    nY = 41  # np.random.randint(spectra0_orig.shape[1])
-    # print(nX, nY)
-
-    data_wt = pywt.dwt(refSpec, wavelet, mode='symmetric', axis=-1)
-    # plt.plot(data_wt)
-    # plt.show()
-    print(np.array(data_wt).shape)
 
 # +---------------------------+
 # |      ms_peak_picker       |
@@ -238,3 +172,38 @@ if __name__ != '__main__':
     # plt.hlines(y=properties["width_heights"], xmin=properties["left_ips"],
     #            xmax=properties["right_ips"], color="C1")
     plt.show()
+# coif4, coif8, coif9, coif10, coif11, coif12
+def create_img(nX, nY, nMZ):
+    img = np.zeros((nX,nY,nMZ))
+    img_sp = np.arange(nX*nY).reshape(nX, nY) + 1
+    for r in range(img.shape[0]):
+        for c in range(img.shape[1]):
+            img[r,c,:] = img_sp[r,c]
+    # print(img.shape)
+    return img
+# image = create_img(7, 5, 10)
+
+# # print("downsampled", image_.shape)
+#
+# fig, ax = plt.subplots(1, 2, figsize=(20, 8), dpi=200)
+# ax[0].imshow(spectra_array[..., 10])
+# ax[1].imshow(downArray[..., 10])
+# plt.show()
+
+# print(downSpec.shape, len(downCoor))
+# print(downCoor)
+
+# msmlfunc2(posLip, downArray, downSpec, downCoor, 3, 0.95, 'down_ml')
+# array = spectra_array_['array']
+# spectra = spectra_array_['data']
+# coordinates = spectra_array_['coordinates']
+
+# for idx, coord in enumerate(coordinates):
+#     # print(idx, coord, ImzObj.coord2index.get(coord))
+#     xpos = coord[0]  # - xr[0]
+#     ypos = coord[1]  # - yr[0]
+#     print(xpos, ypos)
+
+
+
+

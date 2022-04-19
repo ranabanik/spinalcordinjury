@@ -22,6 +22,8 @@ from imzml import IMZMLExtract, normalize_spectrum
 from matchms import Spectrum, calculate_scores
 from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
 from tqdm import tqdm
+from maldi_learn.data import MaldiTofSpectrum
+from maldi_learn.vectorization.binning import BinningVectorizer
 
 class Binning2(object):
     """
@@ -30,7 +32,7 @@ class Binning2(object):
     n_bins: number of bins/samples to be digitized
     plotspec: to plot the new binned spectrum, default--> True
     """
-    def __init__(self, imzObj, regionID, plotspec=False):
+    def __init__(self, imzObj, regionID, plotspec=False):   #binned=True
         self.imzObj = imzObj
         self.regionID = regionID
         self.n_bins = len(imzObj.mzValues) + 1
@@ -54,7 +56,7 @@ class Binning2(object):
             xpos = coord[0] - self.xr[0]
             ypos = coord[1] - self.yr[0]
             sarray[xpos, ypos, :] = bSpec
-            # coordList.append(coord)       # TODO: global
+            # coordList.append(coord)         # global coordinates
             coordList.append((xpos, ypos))    # local coordinates
         return sarray, binned_mat, coordList
 
@@ -73,6 +75,48 @@ class Binning2(object):
             plt.plot(bins[1:], binned_spectrum)
             plt.show()
         return binned_spectrum
+
+    def getUnbinned(self):
+        regInd = self.imzObj.get_region_indices(self.regionID)
+        spec_data = np.zeros([len(regInd), len(self.imzObj.mzValues)]) ## (3435, 1332)
+        spec_array = self.imzObj.get_region_array(self.regionID)
+        xr, yr, zr, _ = self.imzObj.get_region_range(self.regionID)
+        coordList = []
+        for idx, coord in enumerate(regInd):
+            spectrum = self.imzObj.parser.getspectrum(self.imzObj.coord2index.get(coord))  # [0]
+            spec_data[idx] = spectrum[1]
+            xpos = coord[0] - xr[0]
+            ypos = coord[1] - yr[0]
+            spec_array[xpos, ypos] = spectrum[1]
+            coordList.append((xpos, ypos))
+        return spec_array, spec_data, coordList
+
+    def MaldiTofBinning(self):
+        regInd = self.imzObj.get_region_indices(self.regionID)
+        regSpecData = []
+        regSpecCoor = []
+        for idx, coord in enumerate(regInd):
+            spectrum = self.imzObj.parser.getspectrum(self.imzObj.coord2index.get(coord))  # [0]
+            maldispec = []
+            [maldispec.append([mz, ab]) for mz, ab in zip(spectrum[0], spectrum[1])]  # , spectrum[1]:
+            regSpecData.append(MaldiTofSpectrum(maldispec))
+            regSpecCoor.append((coord[0], coord[1]))
+        vectorizer = BinningVectorizer(10000, min_bin=510, max_bin=1800, n_jobs=-1)
+        vectorized = vectorizer.fit_transform(regSpecData)
+
+        # spec_array #self.imzObj.get_region_array(self.regionID)
+        xr, yr, zr, _ = self.imzObj.get_region_range(self.regionID)
+        # self.
+        spec_array = np.zeros([self.imzObj.get_region_shape(self.regionID)[0],
+                               self.imzObj.get_region_shape(self.regionID)[1], 10000])
+        print(spec_array.shape)
+        coordList = []
+        for idx, coord in enumerate(regSpecCoor):
+            xpos = coord[0] - xr[0]
+            ypos = coord[1] - yr[0]
+            spec_array[xpos, ypos] = vectorized[idx]
+            coordList.append((xpos, ypos))
+        return spec_array, np.array(vectorized), coordList
 
 def printStat(data):
     data = np.array(data)
@@ -903,7 +947,7 @@ def msmlfunc2(dirname, regArr, regSpec, regCoor, regID, threshold, exprun_name=N
 def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2,1]):
     """
     downsampling ml enabled and imzl obj dependency minimized.
-    mspath: path to .imzML file
+    mspath: path to .imzML file or .mat file where the array, spectra and coordinates are saved.
     regID: region to be analysed
     threshold: how much variance needed for PCA
     exprun: name of the experimental run
@@ -922,17 +966,17 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     dirname = os.path.dirname(mspath)
     basename = os.path.basename(mspath)
     filename, ext = os.path.splitext(basename)
-    regDir = os.path.join(dirname, 'reg_{}'.format(regID))
+    regDir = os.path.join(dirname, 'reg_{}_ub'.format(regID)) #TODO: change
     if not os.path.isdir(regDir):
         os.mkdir(regDir)
     regname = os.path.join(regDir, '{}_reg_{}.mat'.format(filename, regID))
-    ImzObj = IMZMLExtract(mspath)
     if os.path.isfile(regname):
         matr = loadmat(regname)
         regArr = matr['array']
         regSpec = matr['spectra']
         regCoor = matr['coordinates']
     else:
+        ImzObj = IMZMLExtract(mspath)
         BinObj = Binning2(ImzObj, regID)
         regArr, regSpec, regCoor = BinObj.getBinMat()
         matr = {"spectra": regSpec, "array": regArr, "coordinates": regCoor, "info": "after peakpicking in Cardinal"}
@@ -952,6 +996,9 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
         regDir = os.path.join(regDir, 'down_{}'.format(downsamp_i))
         if not os.path.isdir(regDir):
             os.mkdir(regDir)
+        regname = os.path.join(regDir, '{}_reg_{}_{}.mat'.format(filename, regID, downsamp_i))
+        matr = {"spectra": regSpec, "array": regArr, "coordinates": regCoor, "info": "after peakpicking in Cardinal"}
+        savemat(regname, matr)
     # +------------------------------+
     # |   normalize, standardize     |
     # +------------------------------+
@@ -1543,10 +1590,14 @@ def matchSpecLabel(seg1, seg2, arr1, arr2, plot_fig=True): #TODO: implement for 
         plt.show()
     return specDict
 
-def matchSpecLabel_(plot_fig, *segs, **kwarr): #TODO: implement for multi seg
+def matchSpecLabel2(plot_fig, *segs, **kwarr):
     """
     seg1 & seg2: segmentation file path(.npy)
-    Comparison of segmentation between two region arrays
+    Comparison of segmentation between two region arrays (3D)
+
+    e.g.: matchSpecLabel2(True, seg1_path, seg2_path, seg3_path, arr1=spec_array1,
+                                                                arr2=spec_array2,
+                                                               arr3=spec_array3)
     """
     specDict = {}
     segList = []
@@ -1561,7 +1612,7 @@ def matchSpecLabel_(plot_fig, *segs, **kwarr): #TODO: implement for multi seg
             spec = np.mean(value[np.where(label_)], axis=0)
             spec = {"{}_{}".format(i+1, l): spec}
             specDict.update(spec)
-
+    print(specDict.keys())
     def cosineSim(spectrum1, spectrum2):
         return 1 - cosine(spectrum1,
                           spectrum2)

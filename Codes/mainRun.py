@@ -3,70 +3,74 @@ import copy
 from glob import glob
 import numpy as np
 import pywt
-from Utilities import bestWvltForRegion
-from Utilities import downSpatMS, msmlfunc2, msmlfunc, matchSpecLabel
+from Utilities import msmlfunc3
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import matplotlib as mtl
 mtl.use('TkAgg')    # required for widget slider...
-from scipy.io import loadmat
+from scipy.io import loadmat, savemat
 import time
 from imzml import IMZMLExtract, normalize_spectrum
 
-exprun_name = 'down_ml'
-TIME_STAMP = time.strftime('%Y-%m-%d-%H-%M-%S')
-if exprun_name:
-    exprun = exprun_name + TIME_STAMP
-else:
-    exprun = TIME_STAMP
-# print(exprun)
-RandomState = 20210131
-
-posLip = r'C:\Data\PosLip'
+posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
-# ImzObj = IMZMLExtract(mspath)
-regID = 5
+ImzObj = IMZMLExtract(mspath)
+regID = 4
+
+# spec_array, spec_data, coordList = Binning2(ImzObj, regID, n_bins=2000).MaldiTofBinning()
+# dirname = os.path.dirname(mspath)
+# basename = os.path.basename(mspath)
+# filename, ext = os.path.splitext(basename)
+# regDir = os.path.join(dirname, 'reg_{}'.format(regID))
+# if not os.path.isdir(regDir):
+#     os.mkdir(regDir)
+# regname = os.path.join(regDir, '{}_reg_{}.mat'.format(filename, regID))
+# matr = {"spectra": spec_data, "array": spec_array, "coordinates": coordList, "info": "unbinned"}
+# savemat(regname, matr)
+for regID in [1, 2, 5]:
+    print("Processing: ", regID)
+    # msmlfunc3(mspath, regID=regID, threshold=0.95, exprun='maldi-learn_14k_savgol', downsamp_i=None)
 # regname = os.path.join(posLip, '{}_reg_{}.mat'.format(posLip, regID))
 # BinObj = Binning2(ImzObj, 3)
 # regArr, regSpec, spCoo = BinObj.getBinMat()
-reg1_path = r'C:\Data\PosLip\reg_1_ub'
-reg2_path = r'C:\Data\PosLip\reg_2_ub'
-reg3_path = r'C:\Data\PosLip\reg_3_ub'
-reg4_path = r'C:\Data\PosLip\reg_4_ub'
-reg5_path = r'C:\Data\PosLip\reg_5_ub'
-
-reg3_down = r'C:\Data\PosLip\reg_3\down_2'
-
-spectra_obj1 = loadmat(glob(os.path.join(reg1_path, '*reg_1.mat'))[0])
-spectra_obj2 = loadmat(glob(os.path.join(reg2_path, '*reg_2.mat'))[0])
-spectra_obj3 = loadmat(glob(os.path.join(reg3_path, '*reg_3.mat'))[0])
-spectra_obj4 = loadmat(glob(os.path.join(reg4_path, '*reg_4.mat'))[0])
-spectra_obj5 = loadmat(glob(os.path.join(reg5_path, '*reg_5.mat'))[0])
-# print(spectra_obj3.keys())
-
-spec_array1 = spectra_obj1['array']
-spec_data1 = spectra_obj1['spectra']
-spec_coor1 = spectra_obj1['coordinates']
-
-spec_array2 = spectra_obj2['array']
-spec_data2 = spectra_obj2['spectra']
-spec_coor2 = spectra_obj2['coordinates']
-
-spec_array3 = spectra_obj3['array']
-spec_data3 = spectra_obj3['spectra']
-spec_coor3 = spectra_obj3['coordinates']
-
-spec_array4 = spectra_obj4['array']
-spec_data4 = spectra_obj4['spectra']
-spec_coor4 = spectra_obj4['coordinates']
-
-spec_array5 = spectra_obj5['array']
-spec_data5 = spectra_obj5['spectra']
-spec_coor5 = spectra_obj5['coordinates']
+# reg1_path = r'C:\Data\PosLip\reg_1_ub'
+# reg2_path = r'C:\Data\PosLip\reg_2_ub'
+# reg3_path = r'C:\Data\PosLip\reg_3_ub'
+# reg4_path = r'C:\Data\PosLip\reg_4_ub'
+# reg5_path = r'C:\Data\PosLip\reg_5_ub'
+#
+# reg3_down = r'C:\Data\PosLip\reg_3\down_2'
+#
+# spectra_obj1 = loadmat(glob(os.path.join(reg1_path, '*reg_1.mat'))[0])
+# spectra_obj2 = loadmat(glob(os.path.join(reg2_path, '*reg_2.mat'))[0])
+# spectra_obj3 = loadmat(glob(os.path.join(reg3_path, '*reg_3.mat'))[0])
+# spectra_obj4 = loadmat(glob(os.path.join(reg4_path, '*reg_4.mat'))[0])
+# spectra_obj5 = loadmat(glob(os.path.join(reg5_path, '*reg_5.mat'))[0])
+# # print(spectra_obj3.keys())
+#
+# spec_array1 = spectra_obj1['array']
+# spec_data1 = spectra_obj1['spectra']
+# spec_coor1 = spectra_obj1['coordinates']
+#
+# spec_array2 = spectra_obj2['array']
+# spec_data2 = spectra_obj2['spectra']
+# spec_coor2 = spectra_obj2['coordinates']
+#
+# spec_array3 = spectra_obj3['array']
+# spec_data3 = spectra_obj3['spectra']
+# spec_coor3 = spectra_obj3['coordinates']
+#
+# spec_array4 = spectra_obj4['array']
+# spec_data4 = spectra_obj4['spectra']
+# spec_coor4 = spectra_obj4['coordinates']
+#
+# spec_array5 = spectra_obj5['array']
+# spec_data5 = spectra_obj5['spectra']
+# spec_coor5 = spectra_obj5['coordinates']
 
 # print(spec_coor1, '\n', spec_coor3)
 # downArray, downSpec, downCoor = downSpatMS(spec_array3, 2, [2, 2, 1])
@@ -76,25 +80,25 @@ spec_coor5 = spectra_obj5['coordinates']
 
 # msmlfunc(mspath, regID=1, threshold=0.95, exprun='w_wvlt')
 # msmlfunc2(posLip, spec_array, spec_data, spec_coor, 3, 0.95, 'array_ml')
-from Utilities import msmlfunc3
+
 # for down_i in [0, 1, 2, 3]:
 #     print("downsample >>> ", down_i)
-#     msmlfunc3(mspath, regID=1, threshold=0.95, exprun='downsamp_maldi-learn', downsamp_i=down_i)
+
 
 # msmlfunc2(posLip, downArray, downSpec, downCoor, 3, 0.95, 'down_ml')
 
-seg1_path = glob(os.path.join(reg1_path, '*binning2_gmm_6_3_1.npy'))[0]
-seg2_path = glob(os.path.join(reg2_path, '*binning2_gmm_6_3_1.npy'))[0] #*hdbscan-label.npy
-seg3_path = glob(os.path.join(reg3_path, '*binning2_gmm_6_3_1.npy'))[0]
-seg4_path = glob(os.path.join(reg4_path, '*binning2_gmm_6_3_1.npy'))[0]
-seg5_path = glob(os.path.join(reg5_path, '*binning2_gmm_6_3_1.npy'))[0]
+# seg1_path = glob(os.path.join(reg1_path, '*binning2_gmm_6_3_1.npy'))[0]
+# seg2_path = glob(os.path.join(reg2_path, '*binning2_gmm_6_3_1.npy'))[0] #*hdbscan-label.npy
+# seg3_path = glob(os.path.join(reg3_path, '*binning2_gmm_6_3_1.npy'))[0]
+# seg4_path = glob(os.path.join(reg4_path, '*binning2_gmm_6_3_1.npy'))[0]
+# seg5_path = glob(os.path.join(reg5_path, '*binning2_gmm_6_3_1.npy'))[0]
+#
+# seg3_down = glob(os.path.join(reg3_down, '*6_3_1.npy'))[0]
 
-seg3_down = glob(os.path.join(reg3_down, '*6_3_1.npy'))[0]
-
-from Utilities import matchSpecLabel2
+# from Utilities import matchSpecLabel2
 # matchSpecLabel2(True, seg1_path, seg2_path, seg3_path, seg4_path, arr1=spec_array1, arr2=spec_array2, arr3=spec_array3, arr4=spec_array4) #, arr5=spec_array5)
 
-if __name__ == '__main__':
+if __name__ != '__main__':
     # for downsample #
     reg1_path = r'C:\Data\PosLip\reg_1_ub'
     reg1_down_0 = r'C:\Data\PosLip\reg_1_ub\down_0'
@@ -140,6 +144,50 @@ if __name__ == '__main__':
                                                                                          arr3=spec_array1_1,
                                                                                          arr4=spec_array1_2,
                                                                                          arr5=spec_array1_3)
+if __name__ == '__main__':
+    # for downsample #
+    reg1_path = r'C:\Data\210427-Chen_poslip\reg_1'
+    reg2_path = r'C:\Data\210427-Chen_poslip\reg_2'
+    reg3_path = r'C:\Data\210427-Chen_poslip\reg_3'
+    reg4_path = r'C:\Data\210427-Chen_poslip\reg_4'
+    reg5_path = r'C:\Data\210427-Chen_poslip\reg_5'
+
+
+    seg1_path = glob(os.path.join(reg1_path, '*label.npy'))[0]  #  '*binning2_gmm_6_3_1.npy'))[0]
+    seg2_path = glob(os.path.join(reg2_path, '*label.npy'))[0]  #'*gmm_6_3_1.npy'))[0]
+    seg3_path = glob(os.path.join(reg3_path, '*label.npy'))[0]  #'*gmm_6_3_1.npy'))[0]
+    seg4_path = glob(os.path.join(reg4_path, '*label.npy'))[0]  #'*gmm_6_3_1.npy'))[0]
+    seg5_path = glob(os.path.join(reg5_path, '*label.npy'))[0]  #'*gmm_6_3_1.npy'))[0]
+
+    spec_obj1 = loadmat(glob(os.path.join(reg1_path, '*.mat'))[0])
+    spec_obj2 = loadmat(glob(os.path.join(reg2_path, '*.mat'))[0])
+    spec_obj3 = loadmat(glob(os.path.join(reg3_path, '*.mat'))[0])
+    spec_obj4 = loadmat(glob(os.path.join(reg4_path, '*.mat'))[0])
+    spec_obj5 = loadmat(glob(os.path.join(reg5_path, '*.mat'))[0])
+
+    spec_array1 = spec_obj1['array']
+    spec_data1 = spec_obj1['spectra']
+    spec_coor1 = spec_obj1['coordinates']
+
+    spec_array2 = spec_obj2['array']
+    spec_data2 = spec_obj2['spectra']
+    spec_coor2 = spec_obj2['coordinates']
+
+    spec_array3 = spec_obj3['array']
+    spec_data3 = spec_obj3['spectra']
+    spec_coor3 = spec_obj3['coordinates']
+
+    spec_array4 = spec_obj4['array']
+    spec_data4 = spec_obj4['spectra']
+    spec_coor4 = spec_obj4['coordinates']
+
+    spec_array5 = spec_obj5['array']
+    spec_data5 = spec_obj5['spectra']
+    spec_coor5 = spec_obj5['coordinates']
+    from Utilities import matchSpecLabel2
+
+    matchSpecLabel2(True, seg1_path, seg2_path, seg4_path, seg5_path, arr1=spec_array1, arr2=spec_array2, arr3=spec_array4, arr4=spec_array5) #,
+                                                                                 # arr5=spec_array5)
 
 if __name__ != '__main__':
     # wvltList = pywt.wavelist()
@@ -200,7 +248,6 @@ if __name__ != '__main__':
         fig.canvas.draw()
     win_len.on_changed(update)
     plt.show()
-
 # +---------------------------+
 # |      ms_peak_picker       |
 # +---------------------------+

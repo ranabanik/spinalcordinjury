@@ -11,6 +11,7 @@ from scipy.io import loadmat, savemat
 from scipy import ndimage, signal
 from scipy.spatial.distance import cosine
 import pywt
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
 from umap import UMAP
@@ -32,10 +33,13 @@ class Binning2(object):
     n_bins: number of bins/samples to be digitized
     plotspec: to plot the new binned spectrum, default--> True
     """
-    def __init__(self, imzObj, regionID, plotspec=False):   #binned=True
+    def __init__(self, imzObj, regionID, n_bins, plotspec=False):   #binned=True
         self.imzObj = imzObj
         self.regionID = regionID
-        self.n_bins = len(imzObj.mzValues) + 1
+        if n_bins is None:
+            self.n_bins = len(imzObj.mzValues) + 1
+        else:
+            self.n_bins = n_bins
         self.plotspec = plotspec
         self.xr, self.yr, self.zr, _ = self.imzObj.get_region_range(regionID)
         self.imzeShape = [self.xr[1] - self.xr[0] + 1,
@@ -95,20 +99,20 @@ class Binning2(object):
         regInd = self.imzObj.get_region_indices(self.regionID)
         regSpecData = []
         regSpecCoor = []
-        for idx, coord in enumerate(regInd):
+        for idx, coord in tqdm(enumerate(regInd), desc='#binning%'):
             spectrum = self.imzObj.parser.getspectrum(self.imzObj.coord2index.get(coord))  # [0]
             maldispec = []
             [maldispec.append([mz, ab]) for mz, ab in zip(spectrum[0], spectrum[1])]  # , spectrum[1]:
             regSpecData.append(MaldiTofSpectrum(maldispec))
             regSpecCoor.append((coord[0], coord[1]))
-        vectorizer = BinningVectorizer(10000, min_bin=510, max_bin=1800, n_jobs=-1)
+        vectorizer = BinningVectorizer(self.n_bins, n_jobs=-1) #min_bin=510, max_bin=1800 #TODO: fix the max-min auto
         vectorized = vectorizer.fit_transform(regSpecData)
 
         # spec_array #self.imzObj.get_region_array(self.regionID)
         xr, yr, zr, _ = self.imzObj.get_region_range(self.regionID)
         # self.
         spec_array = np.zeros([self.imzObj.get_region_shape(self.regionID)[0],
-                               self.imzObj.get_region_shape(self.regionID)[1], 10000])
+                               self.imzObj.get_region_shape(self.regionID)[1], self.n_bins])
         print(spec_array.shape)
         coordList = []
         for idx, coord in enumerate(regSpecCoor):
@@ -966,7 +970,7 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     dirname = os.path.dirname(mspath)
     basename = os.path.basename(mspath)
     filename, ext = os.path.splitext(basename)
-    regDir = os.path.join(dirname, 'reg_{}_ub'.format(regID)) #TODO: change
+    regDir = os.path.join(dirname, 'reg_{}'.format(regID))
     if not os.path.isdir(regDir):
         os.mkdir(regDir)
     regname = os.path.join(regDir, '{}_reg_{}.mat'.format(filename, regID))
@@ -977,8 +981,8 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
         regCoor = matr['coordinates']
     else:
         ImzObj = IMZMLExtract(mspath)
-        BinObj = Binning2(ImzObj, regID)
-        regArr, regSpec, regCoor = BinObj.getBinMat()
+        # BinObj = Binning2(ImzObj, regID)
+        regArr, regSpec, regCoor = Binning2(ImzObj, regID, n_bins=1400).MaldiTofBinning()   #BinObj.getBinMat()
         matr = {"spectra": regSpec, "array": regArr, "coordinates": regCoor, "info": "after peakpicking in Cardinal"}
         savemat(regname, matr)    # basename
     nSpecs, nBins = regSpec.shape
@@ -1003,10 +1007,11 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     # |   normalize, standardize     |
     # +------------------------------+
     reg_norm = np.zeros_like(regSpec)
-    _, reg_smooth_ = bestWvltForRegion(regSpec, bestWvlt='db8', smoothed_array=True, plot_fig=False)
+    # _, reg_smooth_, _ = bestWvltForRegion(regSpec, bestWvlt=None, smoothed_array=True, plot_fig=False)
     for s in range(0, nSpecs):
-        reg_norm[s, :] = normalize_spectrum(reg_smooth_[s, :], normalize='tic')
+        reg_norm[s, :] = normalize_spectrum(regSpec[s, :], normalize='tic')     #reg_smooth_
         # reg_norm_ = _smooth_spectrum(regSpec[s, :], method='savgol', window_length=5, polyorder=2)
+        reg_norm[s, :] = _smooth_spectrum(reg_norm[s, :], method='savgol', window_length=5, polyorder=2)
         # printStat(data_norm)
     reg_norm_ss = makeSS(reg_norm).astype(np.float64)
     # reg_norm_ss = StandardScaler().fit_transform(reg_norm)
@@ -1015,15 +1020,17 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     # +----------------+
     if plot_spec:
         nS = np.random.randint(nSpecs)
-        fig, ax = plt.subplots(4, 1, figsize=(16, 10), dpi=200)
+        fig, ax = plt.subplots(5, 1, figsize=(16, 10), dpi=200)
         ax[0].plot(regSpec[nS, :])
-        plt.title("raw spectrum")
+        ax[0].set_title("raw spectrum")
         ax[1].plot(reg_norm[nS, :])
-        plt.title("'tic' norm")
+        ax[1].set_title("'tic' norm")
         ax[2].plot(reg_norm_ss[nS, :])
-        plt.title("standardized")
+        ax[2].set_title("standardized")
         ax[3].plot(np.mean(regSpec, axis=0))
-        plt.title("mean spectra(region {})".format(regID))
+        ax[3].set_title("mean spectra(region {})".format(regID))
+        # ax[4].plot(reg_smooth_[nS, :])
+        # ax[4].set_title("Smoothed...")
         plt.suptitle("Processing comparison of Spec #{}".format(nS))
         plt.show()
 
@@ -1274,8 +1281,9 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
             df_pca_umap_hdbscan.insert(df_pca_umap_hdbscan.shape[1], column=title, value=labels)
 
     df_pca_umap_hdbscan_gmm = copy.deepcopy(df_pca_umap_hdbscan)
-    savecsv = os.path.join(regDir, '{}.csv'.format(exprun))
-    df_pca_umap_hdbscan_gmm.to_csv(savecsv, index=False, sep=',')
+    if save_rseg:
+        savecsv = os.path.join(regDir, '{}.csv'.format(exprun))
+        df_pca_umap_hdbscan_gmm.to_csv(savecsv, index=False, sep=',')
 
     nGs = retrace_columns(df_pca_umap_hdbscan_gmm.columns.values, 'gmm')
     df_gmm_labels = df_pca_umap_hdbscan_gmm.iloc[:, -nGs:]
@@ -1427,7 +1435,7 @@ def bestWvltForRegion(spectra_array, bestWvlt, smoothed_array=True, plot_fig=Tru
     """
     spectra array is of shape: (#Spec, #m/z), where each row value is intensity.
     >> (4587, 1332)
-    bestwvlt: e.g.: 'db8' ; if not given finds.
+    bestwvlt: e.g.: 'db8' or 'rbio2.8' if not given finds.
     smooth_array: if True returns smoothed spectra array with best wavelet.
     plot_fig: plots figure if True.
     e.g.: bestWvltForRegion(spec_data1, bestWvlt='db8', smoothed_array=True, plot_fig=True)
@@ -1435,7 +1443,7 @@ def bestWvltForRegion(spectra_array, bestWvlt, smoothed_array=True, plot_fig=Tru
     if bestWvlt is None:
         wvList = []
         smList = []
-        for nS in tqdm(range(spectra_array.shape[0]), desc = '#spectra%'):
+        for nS in tqdm(range(spectra_array.shape[0]), desc='#spectra%'):
             signal = spectra_array[nS, :]   #   copy.deepcopy(spectra_array[nS, :])
             _, wv, sm = waveletPickwSim(signal, plot_fig=False, verbose=False)
             wvList.append(wv)
@@ -1445,8 +1453,12 @@ def bestWvltForRegion(spectra_array, bestWvlt, smoothed_array=True, plot_fig=Tru
             plt.bar(keys, counts)
             plt.xticks(rotation='vertical')
             plt.show()
+
+            plt.plot(smList)
+            plt.show()
         bestWvlt = max(set(wvList), key=wvList.count)
         print("Best performing wavelet: {}".format(bestWvlt))
+        print("Least similarity found: {} in spectra #{}".format(min(smList), smList.index(min(smList))))
 
     if plot_fig:
         nS = np.random.randint(spectra_array.shape[0])
@@ -1469,15 +1481,15 @@ def bestWvltForRegion(spectra_array, bestWvlt, smoothed_array=True, plot_fig=Tru
         fig.tight_layout(pad=0.2)
         plt.show()
 
-    if smoothed_array:
+    if smoothed_array: # already picked and bestWvlt is None:
         smoothed_array_ = np.zeros_like(spectra_array)
         for nS in range(spectra_array.shape[0]):
             signal = copy.deepcopy(spectra_array[nS, :])
-            filtered = wavelet_denoising(signal, wavelet=bestWvlt)
+            filtered = wavelet_denoising(signal, wavelet=wvList[nS])
             assert (signal.shape == filtered.shape)
             filtered = zeroBaseSpec(filtered)
             smoothed_array_[nS, :] = filtered
-        return bestWvlt, smoothed_array_
+        return bestWvlt, smoothed_array_, smList
     else:
         return bestWvlt
 
@@ -1645,3 +1657,48 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr):
             fig.colorbar(im, cax=cax, ax=ax)
         plt.show()
     return specDict
+
+def rawVSprocessed(rawMSpath, proMSpath):
+    rawMS = IMZMLExtract(rawMSpath)
+    proMS = IMZMLExtract(proMSpath)
+
+    n_spec = np.random.randint(len(rawMS.parser.intensityLengths))
+    mzraw = rawMS.parser.getspectrum(n_spec)[0]
+    abraw = rawMS.parser.getspectrum(n_spec)[1]
+
+    mzpro = proMS.parser.getspectrum(n_spec)[0]
+    abpro = proMS.parser.getspectrum(n_spec)[1]
+
+    fig, ax = plt.subplots(2, 1, dpi=100)
+
+    ax[0].hist(mzraw, color=(0.9, 0, 0), linewidth=1.5, label='raw', bins=200)  # , alpha=0.9)
+    ax[0].set_xlabel("m/z", fontsize=12)
+    ax[0].set_ylabel("intensity", fontsize=12, color=(0.9, 0, 0))
+    ax[0].legend(loc='upper center')
+    ax[0].grid()
+
+    ax[1].plot(mzraw, abraw, color=(0.9, 0, 0), linewidth=1.5, label='raw')  # , alpha=0.9)
+    ax[1].set_xlabel("m/z", fontsize=12)
+    ax[1].set_ylabel("intensity", fontsize=12, color=(0.9, 0, 0))
+    ax[1].legend(loc='upper center')
+    ax[1].grid()
+
+    ax0 = ax[0].twinx()
+    ax0.hist(mzpro, color=(0, 0, 0.9), linewidth=1.5, label='processed', bins=200, alpha=0.5)
+    ax0.set_xlabel("m/z", fontsize=12)
+    ax0.set_ylabel("counts", fontsize=12, color=(0, 0, 0.9), alpha=0.5)
+    ax0.legend(loc='upper right')
+    # ax0[0].grid()
+
+    ax1 = ax[1].twinx()
+    ax1.plot(mzpro, abpro, color=(0, 0, 0.9), linewidth=1.5, label='processed', alpha=0.5)
+    ax1.set_xlabel("m/z", fontsize=12)
+    ax1.set_ylabel("intensity", fontsize=12, color=(0, 0, 0.9), alpha=0.5)
+    ax1.legend(loc='upper right')
+    # ax1[1].grid()
+
+    fig.suptitle('A spectrum representation #{}'.format(n_spec), fontsize=12, y=1)
+    # fig.subplots_adjust(top=0.85)
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(pad=0.2)
+    plt.show()

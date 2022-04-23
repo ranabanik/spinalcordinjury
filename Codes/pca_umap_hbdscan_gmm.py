@@ -25,7 +25,7 @@ import copy
 from IPython import get_ipython
 # %matplotlib inline
 # import matplotlib
-mtl.use('TkAgg')
+# mtl.use('TkAgg')
 # mtl.use('GTK3Agg')
 
 
@@ -602,6 +602,7 @@ def msmlfunc(mspath, regID, threshold, exprun_name=None):
         plt.show()
     return
 
+<<<<<<< HEAD
 # posLip = r'/media/banikr2/DATA/MALDI/210427_Chen_pos_lipid' #
 posLip = r'C:\Data\PosLip'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
@@ -723,3 +724,10 @@ if __name__ != '__main__':
     # plt.hlines(y=properties["width_heights"], xmin=properties["left_ips"],
     #            xmax=properties["right_ips"], color="C1")
     plt.show()
+=======
+posLip = r'/media/banikr2/DATA/MALDI/fromCardinal/PosLip'
+mspath = glob(os.path.join(posLip, '*.imzML'))[0]
+print(mspath)
+
+msmlfunc(mspath, regID=1, threshold=0.95, exprun_name='sav_golay_norm')   # todo: change values
+>>>>>>> 0666ac800ae83715e825339da313b02fb8ddf8b2

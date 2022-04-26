@@ -963,7 +963,7 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     plot_spec = True
     plot_pca = True
     plot_umap = True
-    save_rseg = True
+    save_rseg = False
     # +------------------------------------+
     # |     read data and save region      |
     # +------------------------------------+
@@ -1039,7 +1039,7 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     # |    PCA     |
     # +------------+
     pca_all = PCA(random_state=RandomState)
-    pcs_all = pca_all.fit_transform(data)
+    pcs_all = pca_all.fit_transform(data)   # pca performed on peak picked and m/z binned data
     # pcs_all=pca_all.fit_transform(oldLipid_mm_norm)
     pca_range = np.arange(1, pca_all.n_components_, 1)
     print(">> PCA: number of components #{}".format(pca_all.n_components_))
@@ -1106,9 +1106,9 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     # +------------------+
     # |      UMAP        |
     # +------------------+
-    u_neigh = 12
+    u_neigh = 12    # from grid-parameter search in Hang Hu paper(visual plot)
     u_comp = 3
-    u_min_dist = 0.025
+    u_min_dist = 0.025  # from grid-param Hang Hu paper(visual plot)
     reducer = UMAP(n_neighbors=u_neigh,
                    # default 15, The size of local neighborhood (in terms of number of neighboring sample points) used for manifold approximation.
                    n_components=u_comp,  # default 2, The dimension of the space to embed into.
@@ -1155,7 +1155,7 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
                    unique=False
                    # default False, Controls if the rows of your data should be uniqued before being embedded.
                    )
-    data_umap = reducer.fit_transform(df_pca.values)  # on pca
+    data_umap = reducer.fit_transform(data) #df_pca.values)  # on pca
     for i in range(reducer.n_components):
         df_pca.insert(df_pca.shape[1], column='umap_{}'.format(i + 1), value=data_umap[:, i])
     df_pca_umap = copy.deepcopy(df_pca)
@@ -1245,7 +1245,11 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
         xpos = coord[0]# - xr[0]
         ypos = coord[1]# - yr[0]
         sarray[xpos, ypos] = labels[idx] + 1    # to avoid making 0 as bg
-    sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
+    # sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
+    try:
+        sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
+    except:
+        pass
     fig, ax = plt.subplots(figsize=(6, 8))
     sarrayIm = ax.imshow(sarray)
     fig.colorbar(sarrayIm)
@@ -1303,11 +1307,11 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
         fig, ax = plt.subplots(figsize=(6, 8))
         sarrayIm = ax.imshow(sarray1)
         fig.colorbar(sarrayIm)
-        ax.set_title('reg{}: umap_{}'.format(regID, columnName), fontsize=15, loc='center')
+        ax.set_title('reg{}: {}'.format(regID, columnName), fontsize=15, loc='center')
         plt.show()
         if save_rseg:
-            namepy = os.path.join(regDir, 'umap-{}_{}.npy'.format(exprun, columnName))
-            np.save(namepy, sarray)
+            namepy = os.path.join(regDir, '{}_{}.npy'.format(exprun, columnName))
+            np.save(namepy, sarray1)
     return
 
 def madev(d, axis=None):
@@ -1602,7 +1606,7 @@ def matchSpecLabel(seg1, seg2, arr1, arr2, plot_fig=True): #TODO: implement for 
         plt.show()
     return specDict
 
-def matchSpecLabel2(plot_fig, *segs, **kwarr):
+def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
     """
     seg1 & seg2: segmentation file path(.npy)
     Comparison of segmentation between two region arrays (3D)
@@ -1616,6 +1620,7 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr):
     title = []
     for i, (s, (key, value)) in enumerate(zip(segs, kwarr.items())):
         label = np.load(s)
+        # print(np.unique(label))
         segList.append(label)
         title.append(key)
         for l in range(1, len(np.unique(label))):
@@ -1646,15 +1651,24 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr):
     ax.set_yticklabels(specDict.keys(), rotation=0)
     ax.set_xticklabels(specDict.keys(), rotation=90)
     ax.xaxis.tick_top()
+    ax.set_title("{}".format(kwarr['exprun']))
     # plt.show()
+    # def getSub(i):
+    c_ = 3  # how many columns in subplots
+    if (i + 1) % c_ == 0:
+        r_ = (i + 1) // c_
+    else:
+        r_ = (i + 1) // c_ + 1
+    # return r_, c_
     if plot_fig:
-        fig, axs = plt.subplots(1, i+1, figsize=(12, 16), dpi=300, sharex=False)
+        fig, axs = plt.subplots(r_, c_, figsize=(16, 16), dpi=300, sharex=False)
         for ar, tl, ax in zip(segList, title, axs.ravel()):
             im = ax.imshow(ar) #, cmap='twilight') #cm)
-            ax.set_title(tl, fontsize=20)
+            ax.set_title(tl, fontsize=10)
             divider = make_axes_locatable(ax)
             cax = divider.append_axes('right', size='5%', pad=0.05)
             fig.colorbar(im, cax=cax, ax=ax)
+        plt.suptitle("{}".format(kwarr['exprun']))
         plt.show()
     return specDict
 

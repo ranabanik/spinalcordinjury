@@ -1129,7 +1129,7 @@ class IMZMLExtract:
         minMZ = round(min(masses)*resolution)/resolution
         maxMZ = round(max(masses)*resolution)/resolution
         stepSize = 1/resolution
-        requiredFields = int( (maxMZ-minMZ)/stepSize )
+        requiredFields = int((maxMZ-minMZ)/stepSize)
 
         currentSteps = masses[-1]-masses[-2]
 

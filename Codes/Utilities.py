@@ -10,10 +10,14 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.io import loadmat, savemat
 from scipy import ndimage, signal
 from scipy.spatial.distance import cosine
+import scipy.cluster.hierarchy as sch
 import pywt
+import mglearn
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
+from sklearn.cluster import AgglomerativeClustering
 from umap import UMAP
 import hdbscan
 import matplotlib as mtl
@@ -23,8 +27,122 @@ from imzml import IMZMLExtract, normalize_spectrum
 from matchms import Spectrum, calculate_scores
 from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
 from tqdm import tqdm
-from maldi_learn.data import MaldiTofSpectrum
-from maldi_learn.vectorization.binning import BinningVectorizer
+import joblib
+
+
+class MaldiTofSpectrum(np.ndarray):
+    """Numpy NDArray subclass representing a MALDI-TOF Spectrum."""
+    def __new__(cls, peaks):
+        """Create a MaldiTofSpectrum.
+        Args:
+            peaks: 2d array or list of tuples or list of list containing pairs
+                of mass/charge to intensity.
+        Raises:
+            ValueError: If the input data is not in the correct format.
+        """
+        peaks = np.asarray(peaks).view(cls)
+        if peaks.ndim != 2 or peaks.shape[1] != 2:
+            raise ValueError(
+                f'Input shape of {peaks.shape} does not match expected shape '
+                'for spectrum [n_peaks, 2].'
+            )
+        return peaks
+
+    @property
+    def n_peaks(self):
+        """Get number of peaks of the spectrum."""
+        return self.shape[0]
+
+    @property
+    def intensities(self):
+        """Get the intensities of the spectrum."""
+        return self[:, 1]
+
+    @property
+    def mass_to_charge_ratios(self):
+        """Get mass-t0-charge ratios of spectrum."""
+        return self[:, 0]
+
+class BinningVectorizer(BaseEstimator, TransformerMixin):
+    """Vectorizer based on binning MALDI-TOF spectra.
+    Attributes:
+        bin_edges_: Edges of the bins derived after fitting the transformer.
+    """
+    _required_parameters = ['n_bins']
+
+    def __init__(
+        self,
+        n_bins,
+        min_bin=float('inf'),
+        max_bin=float('-inf'),
+        n_jobs=None
+    ):
+        """Initialize BinningVectorizer.
+
+        Args:
+            n_bins: Number of bins to bin the inputs spectra into.
+            min_bin: Smallest possible bin edge.
+            max_bin: Largest possible bin edge.
+            n_jobs: If set, uses parallel processing with `n_jobs` jobs
+        """
+        self.n_bins = n_bins
+        self.min_bin = min_bin
+        self.max_bin = max_bin
+        self.bin_edges_ = None
+        self.n_jobs = n_jobs
+
+    def fit(self, X, y=None):
+        """Fit transformer, derives bins used to bin spectra."""
+        combined_times = np.concatenate(    # just serialize all mzs in all spec
+            [spectrum[:, 0] for spectrum in X], axis=0)
+        min_range = min(self.min_bin, np.min(combined_times))
+        max_range = max(self.max_bin, np.max(combined_times))
+        _, self.bin_edges_ = np.histogram(
+            combined_times, self.n_bins, range=(min_range, max_range))
+        return self
+
+    def transform(self, X):
+        """Transform list of spectra into vector using bins.
+        Args:
+            X: List of MALDI-TOF spectra
+        Returns:
+            2D numpy array with shape [n_instances x n_bins]
+        """
+        if self.n_jobs is None:
+            output = [self._transform(spectrum) for spectrum in X]
+        else:
+            output = joblib.Parallel(n_jobs=self.n_jobs)(
+                joblib.delayed(self._transform)(s) for s in X
+            )
+
+        return np.stack(output, axis=0)
+
+    def _transform(self, spectrum):
+        times = spectrum[:, 0]  ## mz, time of flight
+        indices = np.digitize(times, self.bin_edges_, right=True)
+        # Drops all instances which are outside the defined bin
+        # range.
+        valid = (indices >= 1) & (indices <= self.n_bins)   # boolean
+        # print("valid", valid)
+        spectrum = spectrum[valid]
+        # Need to update indices to ensure that the first bin is at
+        # position zero.
+        indices = indices[valid] - 1
+        identity = np.eye(self.n_bins)
+
+        vec = np.sum(identity[indices] * spectrum[:, 1][:, np.newaxis], axis=0)
+        return vec
+
+    def detail_(self, x):
+        print("\n")
+        print(x)
+        print(type(x))
+        import matplotlib.pyplot as plt
+        try:
+            plt.plot(x)
+            plt.show()
+        except:
+            pass
 
 class Binning2(object):
     """
@@ -1038,70 +1156,148 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     # +------------+
     # |    PCA     |
     # +------------+
-    pca_all = PCA(random_state=RandomState)
-    pcs_all = pca_all.fit_transform(data)   # pca performed on peak picked and m/z binned data
-    # pcs_all=pca_all.fit_transform(oldLipid_mm_norm)
-    pca_range = np.arange(1, pca_all.n_components_, 1)
-    print(">> PCA: number of components #{}".format(pca_all.n_components_))
-    # printStat(pcs_all)
-    evr = pca_all.explained_variance_ratio_
+    pca = PCA(random_state=RandomState)     # pca object
+    pcs = pca.fit_transform(data)   # (4587, 2000)
+    # pcs=pca.fit_transform(oldLipid_mm_norm)
+    pca_range = np.arange(1, pca.n_components_, 1)
+    print(">> PCA: number of components #{}".format(pca.n_components_))
+    # printStat(pcs)
+    evr = pca.explained_variance_ratio_
     # print(evr)
     evr_cumsum = np.cumsum(evr)
     # print(evr_cumsum)
-    # threshold = 0.95  # to choose PCA variance
     cut_evr = find_nearest(evr_cumsum, threshold)
     nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
-    print(">> Nearest variance to threshold {:.4f} explained by PCA components {}".format(cut_evr, nPCs))
-    df_pca = pd.DataFrame(data=pcs_all[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
+    print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
+    df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
 
-    if plot_pca:
-        MaxPCs = nPCs + 5
-        fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
-        ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
-        ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
-        ax.set_xlabel('Principal component number', fontsize=30)
-        ax.set_ylabel('Percentage of \nvariance explained', fontsize=30)
-        ax.set_ylim([-0.5, 100])
-        ax.set_xlim([-0.5, MaxPCs])
-        ax.grid("on")
+    # # +------------------------------+
+    # # |   Agglomerating Clustering   |
+    # # +------------------------------+
+    # nCl = 7     # todo: how?
+    # agg = AgglomerativeClustering(n_clusters=nCl)
+    # assignment = agg.fit_predict(regSpec)  # on pca
+    # mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
+    # plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    # plt.title("Agglomerative Clustering")
+    # plt.show()
+    #
+    # if plot_pca:
+    #     MaxPCs = nPCs + 5
+    #     fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
+    #     ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
+    #     ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+    #     ax.set_xlabel('Principal component number', fontsize=30)
+    #     ax.set_ylabel('Percentage of \nvariance explained', fontsize=30)
+    #     ax.set_ylim([-0.5, 100])
+    #     ax.set_xlim([-0.5, MaxPCs])
+    #     ax.grid("on")
+    #
+    #     ax2 = ax.twinx()
+    #     ax2.plot(pca_range[0:MaxPCs], evr_cumsum[0:MaxPCs] * 100, color="tomato", marker="D", ms=7)
+    #     ax2.scatter(nPCs, cut_evr * 100, marker='*', s=500, facecolor='blue')
+    #     ax2.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+    #     ax2.set_ylabel('Cumulative percentage', fontsize=30)
+    #     ax2.set_ylim([-0.5, 100])
+    #
+    #     # axis and tick theme
+    #     ax.tick_params(axis="y", colors="steelblue")
+    #     ax2.tick_params(axis="y", colors="tomato")
+    #     ax.tick_params(size=10, color='black', labelsize=25)
+    #     ax2.tick_params(size=10, color='black', labelsize=25)
+    #     ax.tick_params(width=3)
+    #     ax2.tick_params(width=3)
+    #
+    #     ax = plt.gca()  # Get the current Axes instance
+    #
+    #     for axis in ['top', 'bottom', 'left', 'right']:
+    #         ax.spines[axis].set_linewidth(3)
+    #
+    #     plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+    #     plt.show()
+    #
+    #     plt.figure(figsize=(12, 10), dpi=200)
+    #     # plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+    #     # plt.scatter(df_pca.PC_1, df_pca.PC_2, c=assignment, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+    #     mglearn.discrete_scatter(df_pca.PC_1, df_pca.PC_2, assignment, alpha=0.5) #, labels=np.unique(assignment))
+    #     plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
+    #     plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
+    #     plt.tick_params(size=10, color='black')
+    #     # tick and axis theme
+    #     plt.xticks(fontsize=20)
+    #     plt.yticks(fontsize=20)
+    #     plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    #     ax = plt.gca()  # Get the current Axes instance
+    #     for axis in ['top', 'bottom', 'left', 'right']:
+    #         ax.spines[axis].set_linewidth(2)
+    #     ax.tick_params(width=2)
+    #     plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+    #     plt.show()
 
-        ax2 = ax.twinx()
-        ax2.plot(pca_range[0:MaxPCs], evr_cumsum[0:MaxPCs] * 100, color="tomato", marker="D", ms=7)
-        ax2.scatter(nPCs, cut_evr * 100, marker='*', s=500, facecolor='blue')
-        ax2.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
-        ax2.set_ylabel('Cumulative percentage', fontsize=30)
-        ax2.set_ylim([-0.5, 100])
+    # +-------------------+
+    # |   HC_clustering   |
+    # +-------------------+
+    HC_method = 'ward'
+    HC_metric = 'euclidean'
+    Y = sch.linkage(df_pca.values, method=HC_method, metric=HC_metric)
+    Z = sch.dendrogram(Y, no_plot=True)
+    HC_idx = Z['leaves']
+    HC_idx = np.array(HC_idx)
 
-        # axis and tick theme
-        ax.tick_params(axis="y", colors="steelblue")
-        ax2.tick_params(axis="y", colors="tomato")
-        ax.tick_params(size=10, color='black', labelsize=25)
-        ax2.tick_params(size=10, color='black', labelsize=25)
-        ax.tick_params(width=3)
-        ax2.tick_params(width=3)
+    # plot it
+    thre_dist = 375  #TODO: how to fix it?
+    plt.figure(figsize=(15, 10))
+    Z = sch.dendrogram(Y, color_threshold=thre_dist)
+    plt.title('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
+        HC_method, HC_metric, thre_dist))
 
-        ax = plt.gca()  # Get the current Axes instance
+    ## 2. sort features with clustering results
+    features_modi_sorted = df_pca.values[HC_idx]
 
-        for axis in ['top', 'bottom', 'left', 'right']:
-            ax.spines[axis].set_linewidth(3)
+    # plot it
+    fig = plt.figure(figsize=(10, 10))
+    axmatrix = fig.add_axes([0.10, 0, 0.80, 0.80])
+    im = axmatrix.matshow(features_modi_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
+    fig.gca().invert_yaxis()
 
-        plt.suptitle("PCA performed with {} features".format(pca_all.n_features_), fontsize=30)
-        plt.show()
+    # colorbar
+    axcolor = fig.add_axes([0.96, 0, 0.02, 0.80])
+    cbar = plt.colorbar(im, cax=axcolor)
+    axcolor.tick_params(labelsize=10)
+    plt.show()
 
-        plt.figure(figsize=(12, 10), dpi=200)
-        plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
-        plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
-        plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
-        plt.tick_params(size=10, color='black')
-        # tick and axis theme
-        plt.xticks(fontsize=20)
-        plt.yticks(fontsize=20)
-        ax = plt.gca()  # Get the current Axes instance
-        for axis in ['top', 'bottom', 'left', 'right']:
-            ax.spines[axis].set_linewidth(2)
-        ax.tick_params(width=2)
-        plt.suptitle("PCA performed with {} features".format(pca_all.n_features_), fontsize=30)
-        plt.show()
+    #TODO: fix here...
+
+    # from scipy.cluster.hierarchy import fcluster
+    # HC_labels = fcluster(Y, thre_dist, criterion='distance')
+    #
+    # # print("HC_labels >> ", len(np.unique(HC_labels)), HC_labels)
+    # # prepare label data
+    # elements, counts = np.unique(HC_labels, return_counts=True)
+    # # print("elements >> ", elements, counts)     # [1 2 3 4 5]
+    # ### PCA loadings
+    # loadings1 = pca.components_.T    # loadings.shape > (2000, 3)
+    # # loadings2 = pca.components_
+    # # print("loadings >>", loadings, loadings.shape)
+    # # sum of squared loadings
+    # print("pca.components_ >> ", np.min(pca.components_),np.max(pca.components_), np.shape(pca.components_))
+    # SSL1 = np.sum(loadings1 ** 2, axis=1)    # SSL >> (2000,) 2000
+    # # SSL2 = np.sum(loadings2 ** 2, axis=1)  # SSL >> (2000,) 2000
+    # # print("SSL >>", SSL.shape, len(SSL))
+    # for label in elements:
+    #     idx = np.where(HC_labels == label)[0]
+    #     print("idx >>", idx)
+    #     # total SSL
+    #     total_SSL = np.sum(SSL1[idx])
+    #     # imgs in the cluster
+    #     # current_cluster = imgs_std[idx]
+    #     # average img
+    #     # mean_img = np.mean(imgs_std[idx], axis=0)
+    #
+    #     # accumulate data
+    #     # total_SSLs.append(total_SSL)
+    #     # mean_imgs.append(mean_img)
+
 
     # +------------------+
     # |      UMAP        |

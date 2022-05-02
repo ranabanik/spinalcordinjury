@@ -9,7 +9,7 @@ import pickle
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import matplotlib as mtl
-mtl.use('TkAgg')    # required for widget slider...
+# mtl.use('TkAgg')    # required for widget slider...
 from scipy.io import loadmat, savemat
 import time
 from imzml import IMZMLExtract, normalize_spectrum
@@ -19,9 +19,9 @@ mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
 # ImzObj = IMZMLExtract(mspath)
-regID = 5
+regID = 3
 
-msmlfunc3(mspath, regID=regID, threshold=0.95, exprun='umap+gmm_corr_2k', downsamp_i=None, wSize=None)
+msmlfunc3(mspath, regID=regID, threshold=0.95, exprun='HC_ion_img', downsamp_i=None, wSize=None)
 
 # spec_array, spec_data, coordList = Binning2(ImzObj, regID, n_bins=2000).MaldiTofBinning()
 # dirname = os.path.dirname(mspath)

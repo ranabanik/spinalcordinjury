@@ -692,7 +692,7 @@ def msmlfunc(mspath, regID, threshold, exprun=None):
         for j in range(n_component.shape[0]):  # ensemble with different n_component value
             StaTime = time.time()
             gmm = GMM(n_components=n_component[j], max_iter=5000)  # max_iter does matter, no random seed assigned
-            labels = gmm.fit_predict(data_umap)     #todo data_umap
+            labels = gmm.fit_predict(data_umap)
             # save data
             index = j + 1 + i * n_component.shape[0]
             title = 'gmm_' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
@@ -1912,3 +1912,7 @@ def rawVSprocessed(rawMSpath, proMSpath):
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig.tight_layout(pad=0.2)
     plt.show()
+
+
+
+

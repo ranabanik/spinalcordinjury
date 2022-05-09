@@ -14,14 +14,267 @@ from scipy.io import loadmat, savemat
 import time
 from imzml import IMZMLExtract, normalize_spectrum
 
-posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
+# posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
+posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
 # ImzObj = IMZMLExtract(mspath)
-regID = 3
+# regID = 3
+# print(len(ImzObj.parser.intensityLengths))
+from scipy import interpolate
+def interpolate_spectrum(spec, masses, masses_new, method="Pchip"):
+    """_summary_
 
-msmlfunc3(mspath, regID=regID, threshold=0.95, exprun='HC_ion_img', downsamp_i=None, wSize=None)
+    Args:
+        spec (list/numpy.array, optional): spectrum
+        masses (list): list of corresponding m/z values (same length as spectra)
+        masses_new (list): list of m/z values
+        method (str, optional):  Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
+
+    Returns:
+        lisr: updated spectrum
+    """
+    if method == "akima":
+        f = interpolate.Akima1DInterpolator(masses, spec)
+        specNew = f(masses_new)
+    elif method == "interp1d":
+        f = interpolate.interp1d(masses, spec)
+        specNew = f(masses_new)
+    elif method == "CubicSpline":
+        f = interpolate.CubicSpline(masses, spec)
+        specNew = f(masses_new)
+    elif method == "Pchip":
+        f = interpolate.PchipInterpolator(masses, spec)
+        specNew = f(masses_new)
+    elif method == "Barycentric":
+        f = interpolate.BarycentricInterpolator(masses, spec)
+        specNew = f(masses_new)
+    else:
+        raise Exception("Unknown interpolation method")
+
+    return specNew
+
+def regResamp(mspath, regID): #>> ImzObj,
+    # dataDir = r''
+    ImzObj = IMZMLExtract(mspath)
+    mzList = []
+    mzSum = 0
+    regInd = ImzObj.get_region_indices(regID)
+    mzPath = os.path.join(os.path.dirname(mspath), 'mzList_{}.bin'.format(regID))
+    if not os.path.exists(mzPath):
+        for coord in tqdm(regInd):
+            # print(coord)
+            spectrum = ImzObj.parser.getspectrum(ImzObj.coord2index.get(coord))  # [0]
+            mzList += list(spectrum[0])
+            mzSum += len(spectrum[0])
+        print("mzList", len(mzList))
+        print("mzSum", mzSum)
+        elements, counts = np.unique(mzList, return_counts=True)
+
+        mzDict = {'elements': elements,
+                  'counts': counts}
+
+        mzPath = os.path.join(os.path.dirname(mspath), 'mzList_{}.bin'.format(regID))
+        # print(mzPath)
+        with open(mzPath, 'wb') as pfile:
+            pickle.dump(mzDict, pfile)
+    else:
+        with open(mzPath, 'rb') as pfile:
+            mzDict = pickle.load(pfile)
+        print(mzDict.keys())
+        elements = mzDict['elements']
+        counts = mzDict['counts']
+    prcntl_thr = 95
+    # print(np.percentile(counts, 95))
+    # print(np.sum(counts <= np.percentile(counts, 95)))
+    elements = elements[np.where(counts > np.percentile(counts, prcntl_thr))]
+    # print("len(elements): ", len(elements))
+    print("length of elements changed from {} to {}".format(len(counts), len(elements)))
+    spec_data = np.zeros([len(ImzObj.get_region_indices(regID)), len(elements)])
+    idx = 0
+    for coord in tqdm(regInd):
+        spectrum = ImzObj.parser.getspectrum(ImzObj.coord2index.get(coord))  # [0]
+        spec_data[idx, :] = interpolate_spectrum(spectrum[1], spectrum[0], elements, method='Pchip')
+        idx += 1
+
+    interSpecPath = os.path.join(os.path.dirname(mspath), 'resSpec1D_{}.bin'.format(regID))
+    # print(mzPath)
+    with open(interSpecPath, 'wb') as pfile:
+        pickle.dump(spec_data, pfile)
+
+# regResamp(mspath, 1)
+# +----------------------+
+# |    get all bins      |
+# +----------------------+
+if __name__ != '__main__':
+    mzList = []
+    mzSum = 0
+    for spx in tqdm(range(len(ImzObj.parser.intensityLengths))):
+        sp = ImzObj.parser.getspectrum(spx)
+        print(sp[0].dtype, type(sp[0]))
+        mzSum += len(sp[0])
+        # try:
+        mzList += list(sp[0])
+        break
+    print("mzList", len(mzList))
+    print("mzSum", mzSum)
+    elements, counts = np.unique(mzList, return_counts=True)
+    print("total m/z s {} and common m/z s {}".format(len(mzList), len(elements)))
+
+    mzDict = {'mzList': mzList,
+              'bins': elements}
+
+    mzPath = os.path.join(posLip, 'mzList.bin')
+    # print(mzPath)
+    with open(mzPath, 'wb') as pfile:
+        pickle.dump(mzDict, pfile)
+
+# mzPath = os.path.join(posLip, 'mzList_1.bin')
+# with open(mzPath, 'rb') as pfile:
+#     mzDict = pickle.load(pfile)
+# #
+# print(mzDict.keys())
+# # mzList = mzDict['mzList']
+# elements = mzDict['elements']
+# counts = mzDict['counts']
+
+regID = 1
+interSpecPath = os.path.join(os.path.dirname(mspath), 'resSpec1D_{}.bin'.format(regID))
+with open(interSpecPath, 'rb') as pfile:
+    resSpec1D = pickle.load(pfile)
+
+print(resSpec1D.shape)
+ch_idx = 240
+plt.plot(resSpec1D[ch_idx])
+plt.show()
+ImzObj = IMZMLExtract(mspath)
+regInd = ImzObj.get_region_indices(regID)
+idx = 0
+for coord in tqdm(regInd):
+    spectrum = ImzObj.parser.getspectrum(ImzObj.coord2index.get(coord))
+    if idx==ch_idx:
+        plt.plot(spectrum[1])
+        plt.show()
+        break
+    idx+=1
+from Utilities import _smooth_spectrum,find_nearest, makeSS
+from sklearn.decomposition import PCA
+import pandas as pd
+import mglearn
+import matplotlib.cm as cm
+from sklearn.cluster import AgglomerativeClustering
+
+reg_norm = np.zeros_like(resSpec1D)
+for s in range(0, resSpec1D.shape[0]):
+    reg_norm[s, :] = normalize_spectrum(resSpec1D[s, :], normalize='tic')  # reg_smooth_
+    reg_norm[s, :] = _smooth_spectrum(reg_norm[s, :], method='savgol', window_length=5, polyorder=2)
+reg_norm_ss = makeSS(reg_norm).astype(np.float64)
+
+nS = np.random.randint(resSpec1D.shape[0])
+fig, ax = plt.subplots(4, 1, figsize=(16, 10), dpi=200)
+ax[0].plot(resSpec1D[nS, :])
+ax[0].set_title("raw spectrum")
+ax[1].plot(reg_norm[nS, :])
+ax[1].set_title("'tic' norm")
+ax[2].plot(reg_norm_ss[nS, :])
+ax[2].set_title("standardized")
+ax[3].plot(np.mean(resSpec1D, axis=0))
+ax[3].set_title("mean spectra(region {})".format(regID))
+# ax[4].plot(reg_smooth_[nS, :])
+# ax[4].set_title("Smoothed...")
+plt.suptitle("Processing comparison of Spec #{}".format(nS))
+plt.show()
+RandomState = 20210131
+pca = PCA(random_state=RandomState)     # pca object
+pcs = pca.fit_transform(reg_norm_ss)   # (4587, 2000)
+# pcs=pca.fit_transform(oldLipid_mm_norm)
+pca_range = np.arange(1, pca.n_components_, 1)
+print(">> PCA: number of components #{}".format(pca.n_components_))
+# printStat(pcs)
+evr = pca.explained_variance_ratio_
+# print(evr)
+evr_cumsum = np.cumsum(evr)
+# print(evr_cumsum)
+cut_evr = find_nearest(evr_cumsum, 0.95)
+nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
+print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
+df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
+MaxPCs = nPCs + 5
+fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
+ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
+ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+ax.set_xlabel('Principal component number', fontsize=30)
+ax.set_ylabel('Percentage of \n variance explained', fontsize=30)
+ax.set_ylim([-0.5, 100])
+ax.set_xlim([-0.5, MaxPCs])
+ax.grid("on")
+
+ax2 = ax.twinx()
+ax2.plot(pca_range[0:MaxPCs], evr_cumsum[0:MaxPCs] * 100, color="tomato", marker="D", ms=7)
+ax2.scatter(nPCs, cut_evr * 100, marker='*', s=500, facecolor='blue')
+ax2.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+ax2.set_ylabel('Cumulative percentage', fontsize=30)
+ax2.set_ylim([-0.5, 100])
+
+# axis and tick theme
+ax.tick_params(axis="y", colors="steelblue")
+ax2.tick_params(axis="y", colors="tomato")
+ax.tick_params(size=10, color='black', labelsize=25)
+ax2.tick_params(size=10, color='black', labelsize=25)
+ax.tick_params(width=3)
+ax2.tick_params(width=3)
+
+ax = plt.gca()  # Get the current Axes instance
+
+for axis in ['top', 'bottom', 'left', 'right']:
+    ax.spines[axis].set_linewidth(3)
+
+plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+plt.show()
+
+nCl = 7     # todo: how?
+agg = AgglomerativeClustering(n_clusters=nCl)
+assignment = agg.fit_predict(reg_norm_ss)  # on pca
+# mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
+plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+plt.title("Agglomerative Clustering")
+plt.show()
+
+plt.figure(figsize=(12, 10), dpi=200)
+# plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+# plt.scatter(df_pca.PC_1, df_pca.PC_2, c=assignment, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+mglearn.discrete_scatter(df_pca.PC_1, df_pca.PC_2, assignment, alpha=0.5) #, labels=np.unique(assignment))
+plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
+plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
+plt.tick_params(size=10, color='black')
+# tick and axis theme
+plt.xticks(fontsize=20)
+plt.yticks(fontsize=20)
+# plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+ax = plt.gca()  # Get the current Axes instance
+for axis in ['top', 'bottom', 'left', 'right']:
+    ax.spines[axis].set_linewidth(2)
+ax.tick_params(width=2)
+plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+plt.show()
+
+
+# print("len(elements): {}, counts: {}".format(len(elements), counts))
+#
+# plt.plot(counts)
+# plt.show()
+# print(elements[0:100])
+# print(np.percentile(counts, 95))
+# print(np.sum(counts <= np.percentile(counts, 95)))
+# elements = elements[np.where(counts > np.percentile(counts, 95))]
+# print("len(elements): ", len(elements))
+# print(elements)
+# spec_data = np.zeros([len(ImzObj.get_region_indices(regID)), len(elements)]) ## (3435, 1332)
+
+
+
+# msmlfunc3(mspath, regID=regID, threshold=0.95, exprun='HC_ion_img', downsamp_i=None, wSize=None)
 
 # spec_array, spec_data, coordList = Binning2(ImzObj, regID, n_bins=2000).MaldiTofBinning()
 # dirname = os.path.dirname(mspath)

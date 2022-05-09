@@ -1365,7 +1365,9 @@ class IMZMLExtract:
 
 
     def get_region_array(self, regionid, makeNullLine=True, bgspec=None):
-        """Returns a 2D array of spectra for the specified regionid. Subtracts the minimal intensity to accommodate for intensity shifts (due to different heights of the sample). Can subtract a background spectrum for all loaded spectra.
+        """
+        doesn't help cause fills/adds 0
+        Returns a 2D array of spectra for the specified regionid. Subtracts the minimal intensity to accommodate for intensity shifts (due to different heights of the sample). Can subtract a background spectrum for all loaded spectra.
 
         Args:
             regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.

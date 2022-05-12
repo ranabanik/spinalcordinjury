@@ -1166,7 +1166,6 @@ class IMZMLExtract:
                     if peak.area > 0.0:
                         rpeak2peaks[round(peak.mz*resolution)/resolution].append(peak)
 
-
                 rpeak2peak = {}
                 fpeaklist = []
 

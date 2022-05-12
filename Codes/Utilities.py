@@ -8,7 +8,7 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.io import loadmat, savemat
-from scipy import ndimage, signal
+from scipy import ndimage, signal, interpolate
 from scipy.spatial.distance import cosine
 import scipy.cluster.hierarchy as sch
 import pywt
@@ -23,11 +23,115 @@ import hdbscan
 import matplotlib as mtl
 import matplotlib.cm as cm
 import seaborn as sns
+from pyimzml.ImzMLParser import ImzMLParser
 from imzml import IMZMLExtract, normalize_spectrum
 from matchms import Spectrum, calculate_scores
 from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
 from tqdm import tqdm
 import joblib
+from collections import defaultdict
+
+def interpolate_spectrum(spec, masses, masses_new, method="Pchip"):
+    """_summary_
+
+    Args:
+        spec (list/numpy.array, optional): spectrum
+        masses (list): list of corresponding m/z values (same length as spectra)
+        masses_new (list): list of m/z values
+        method (str, optional):  Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
+
+    Returns:
+        lisr: updatedd spectrum
+    """
+    if method == "akima":
+        f = interpolate.Akima1DInterpolator(masses, spec)
+        specNew = f(masses_new)
+    elif method == "interp1d":
+        f = interpolate.interp1d(masses, spec)
+        specNew = f(masses_new)
+    elif method == "CubicSpline":
+        f = interpolate.CubicSpline(masses, spec)
+        specNew = f(masses_new)
+    elif method == "Pchip":
+        f = interpolate.PchipInterpolator(masses, spec)
+        specNew = f(masses_new)
+    elif method == "Barycentric":
+        f = interpolate.BarycentricInterpolator(masses, spec)
+        specNew = f(masses_new)
+    else:
+        raise Exception("Unknown interpolation method")
+
+    return specNew
+
+#TODO: create my better ImzMLExtract based on pyImzml
+class ImzmlAll(object):
+    def __init__(self, mspath):
+        self.mspath = mspath
+        self.parser = ImzMLParser(mspath)   # this is ImzObj
+
+    def _coord2index(self):
+        coord2index = {}
+        for sidx, coord in enumerate(self.parser.coordinates):
+            coord2index[coord] = sidx
+        return coord2index
+
+    def get_region(self, regID):
+        regionCoords = defaultdict(list)
+        labeled_array, num_features = self.find_regions()
+        for x in range(0, labeled_array.shape[0]):
+            for y in range(0, labeled_array.shape[1]):
+                if labeled_array[x, y] == 0:
+                    continue
+                regionCoords[labeled_array[x, y]].append((x, y, 1))
+        regionPixels = regionCoords[regID]
+        # print("regionPixels >>", regionPixels) #  [(704, 180, 1), (705, 178, 1), ...
+        coord2index = self._coord2index()
+        longestmzlength = 0
+        for coord in regionPixels:
+            if self.parser.mzLengths[coord2index[coord]] > longestmzlength:
+                longestmzIdx = coord2index[coord]
+                longestmzlength = self.parser.mzLengths[coord2index[coord]]
+
+        minx = min([x[0] for x in regionPixels])
+        maxx = max([x[0] for x in regionPixels])
+        miny = min([x[1] for x in regionPixels])
+        maxy = max([x[1] for x in regionPixels])
+        minz = min([x[2] for x in regionPixels])
+        maxz = max([x[2] for x in regionPixels])
+
+        regionshape = [maxx-minx+1,
+                       maxy-miny+1]
+        if maxz-minz+1 > 1:
+            regionshape.append(maxz-minz+1)
+
+        regionshape.append(longestmzlength)
+
+        array3D = np.zeros(regionshape, dtype=np.float32)
+        array2D = np.zeros(len(regionPixels), longestmzlength, dtype=np.float32)
+        longestmz = self.parser.getspectrum(longestmzIdx)[0]
+        for idx, coord in enumerate(regionPixels):
+            xpos = coord[0] - minx
+            ypos = coord[1] - miny
+            spectra = self.parser.getspectrum(coord2index[coord])
+            interp_spectra = interpolate_spectrum(spectra[1], spectra[0], longestmz, method='Pchip')
+            array3D[xpos, ypos, :] = interp_spectra
+            array2D[idx, :] = interp_spectra
+        return array3D, array2D, longestmz, regionPixels, regionshape
+
+    def find_regions(self):
+        maxX = 0
+        maxY = 0
+        for idx, coord in enumerate(self.parser.coordinates):
+            maxX = max(maxX, coord[0])
+            maxY = max(maxY, coord[1])
+        img = np.zeros((maxX + 1, maxY + 1))
+
+        for coord in self.parser.coordinates:
+            img[coord[0], coord[1]] = 1
+
+        labeled_array, num_features = ndimage.label(img, structure=np.ones((3, 3)))
+        # print("There are {} regions.".format(num_features))
+        return labeled_array, num_features
 
 
 class MaldiTofSpectrum(np.ndarray):

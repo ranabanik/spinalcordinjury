@@ -3,7 +3,7 @@ import copy
 from glob import glob
 import numpy as np
 import pywt
-from Utilities import msmlfunc3, downSpatMS, matchSpecLabel2
+from Utilities import msmlfunc3, downSpatMS, matchSpecLabel2, ImzmlAll
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -13,16 +13,22 @@ import matplotlib as mtl
 from scipy.io import loadmat, savemat
 import time
 from imzml import IMZMLExtract, normalize_spectrum
+from scipy import interpolate
+from pyimzml.ImzMLParser import ImzMLParser
 
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
 posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
-# ImzObj = IMZMLExtract(mspath)
-# regID = 3
-# print(len(ImzObj.parser.intensityLengths))
-from scipy import interpolate
+ImzObj = ImzmlAll(mspath)
+# ImzObj.find_regions()
+
+sarray, longestmz, _, _ = ImzObj.get_region(1)
+print(sarray.shape[2]//2)
+plt.imshow(sarray[..., sarray.shape[2]//2 + 560])
+plt.show()
+
 def interpolate_spectrum(spec, masses, masses_new, method="Pchip"):
     """_summary_
 
@@ -56,6 +62,9 @@ def interpolate_spectrum(spec, masses, masses_new, method="Pchip"):
     return specNew
 
 def regResamp(mspath, regID): #>> ImzObj,
+    """
+    saves intensities with same size vectors...
+    """
     # dataDir = r''
     ImzObj = IMZMLExtract(mspath)
     mzList = []
@@ -139,125 +148,129 @@ if __name__ != '__main__':
 # elements = mzDict['elements']
 # counts = mzDict['counts']
 
-regID = 1
-interSpecPath = os.path.join(os.path.dirname(mspath), 'resSpec1D_{}.bin'.format(regID))
-with open(interSpecPath, 'rb') as pfile:
-    resSpec1D = pickle.load(pfile)
+# regID = 1
+# interSpecPath = os.path.join(os.path.dirname(mspath), 'resSpec1D_{}.bin'.format(regID))
+# with open(interSpecPath, 'rb') as pfile:
+#     resSpec1D = pickle.load(pfile)
+#
+# plt.plot(resSpec1D[2000, :])
+# plt.show()
+# print(resSpec1D.shape)
+# ch_idx = 240
+# plt.plot(resSpec1D[ch_idx])
+# plt.show()
+# ImzObj = IMZMLExtract(mspath)
+# regInd = ImzObj.get_region_indices(regID)
+# idx = 0
+# for coord in tqdm(regInd):
+#     spectrum = ImzObj.parser.getspectrum(ImzObj.coord2index.get(coord))
+#     if idx==ch_idx:
+#         plt.plot(spectrum[1])
+#         plt.show()
+#         break
+#     idx+=1
 
-print(resSpec1D.shape)
-ch_idx = 240
-plt.plot(resSpec1D[ch_idx])
-plt.show()
-ImzObj = IMZMLExtract(mspath)
-regInd = ImzObj.get_region_indices(regID)
-idx = 0
-for coord in tqdm(regInd):
-    spectrum = ImzObj.parser.getspectrum(ImzObj.coord2index.get(coord))
-    if idx==ch_idx:
-        plt.plot(spectrum[1])
-        plt.show()
-        break
-    idx+=1
-from Utilities import _smooth_spectrum,find_nearest, makeSS
-from sklearn.decomposition import PCA
-import pandas as pd
-import mglearn
-import matplotlib.cm as cm
-from sklearn.cluster import AgglomerativeClustering
+if __name__ != '__main__':
+    from Utilities import _smooth_spectrum,find_nearest, makeSS
+    from sklearn.decomposition import PCA
+    import pandas as pd
+    import mglearn
+    import matplotlib.cm as cm
+    from sklearn.cluster import AgglomerativeClustering
 
-reg_norm = np.zeros_like(resSpec1D)
-for s in range(0, resSpec1D.shape[0]):
-    reg_norm[s, :] = normalize_spectrum(resSpec1D[s, :], normalize='tic')  # reg_smooth_
-    reg_norm[s, :] = _smooth_spectrum(reg_norm[s, :], method='savgol', window_length=5, polyorder=2)
-reg_norm_ss = makeSS(reg_norm).astype(np.float64)
+    reg_norm = np.zeros_like(resSpec1D)
+    for s in range(0, resSpec1D.shape[0]):
+        reg_norm[s, :] = normalize_spectrum(resSpec1D[s, :], normalize='tic')  # reg_smooth_
+        reg_norm[s, :] = _smooth_spectrum(reg_norm[s, :], method='savgol', window_length=5, polyorder=2)
+    reg_norm_ss = makeSS(reg_norm).astype(np.float64)
 
-nS = np.random.randint(resSpec1D.shape[0])
-fig, ax = plt.subplots(4, 1, figsize=(16, 10), dpi=200)
-ax[0].plot(resSpec1D[nS, :])
-ax[0].set_title("raw spectrum")
-ax[1].plot(reg_norm[nS, :])
-ax[1].set_title("'tic' norm")
-ax[2].plot(reg_norm_ss[nS, :])
-ax[2].set_title("standardized")
-ax[3].plot(np.mean(resSpec1D, axis=0))
-ax[3].set_title("mean spectra(region {})".format(regID))
-# ax[4].plot(reg_smooth_[nS, :])
-# ax[4].set_title("Smoothed...")
-plt.suptitle("Processing comparison of Spec #{}".format(nS))
-plt.show()
-RandomState = 20210131
-pca = PCA(random_state=RandomState)     # pca object
-pcs = pca.fit_transform(reg_norm_ss)   # (4587, 2000)
-# pcs=pca.fit_transform(oldLipid_mm_norm)
-pca_range = np.arange(1, pca.n_components_, 1)
-print(">> PCA: number of components #{}".format(pca.n_components_))
-# printStat(pcs)
-evr = pca.explained_variance_ratio_
-# print(evr)
-evr_cumsum = np.cumsum(evr)
-# print(evr_cumsum)
-cut_evr = find_nearest(evr_cumsum, 0.95)
-nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
-print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
-df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
-MaxPCs = nPCs + 5
-fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
-ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
-ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
-ax.set_xlabel('Principal component number', fontsize=30)
-ax.set_ylabel('Percentage of \n variance explained', fontsize=30)
-ax.set_ylim([-0.5, 100])
-ax.set_xlim([-0.5, MaxPCs])
-ax.grid("on")
+    nS = np.random.randint(resSpec1D.shape[0])
+    fig, ax = plt.subplots(4, 1, figsize=(16, 10), dpi=200)
+    ax[0].plot(resSpec1D[nS, :])
+    ax[0].set_title("raw spectrum")
+    ax[1].plot(reg_norm[nS, :])
+    ax[1].set_title("'tic' norm")
+    ax[2].plot(reg_norm_ss[nS, :])
+    ax[2].set_title("standardized")
+    ax[3].plot(np.mean(resSpec1D, axis=0))
+    ax[3].set_title("mean spectra(region {})".format(regID))
+    # ax[4].plot(reg_smooth_[nS, :])
+    # ax[4].set_title("Smoothed...")
+    plt.suptitle("Processing comparison of Spec #{}".format(nS))
+    plt.show()
+    RandomState = 20210131
+    pca = PCA(random_state=RandomState)     # pca object
+    pcs = pca.fit_transform(reg_norm_ss)   # (4587, 2000)
+    # pcs=pca.fit_transform(oldLipid_mm_norm)
+    pca_range = np.arange(1, pca.n_components_, 1)
+    print(">> PCA: number of components #{}".format(pca.n_components_))
+    # printStat(pcs)
+    evr = pca.explained_variance_ratio_
+    # print(evr)
+    evr_cumsum = np.cumsum(evr)
+    # print(evr_cumsum)
+    cut_evr = find_nearest(evr_cumsum, 0.95)
+    nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
+    print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
+    df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
+    MaxPCs = nPCs + 5
+    fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
+    ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
+    ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+    ax.set_xlabel('Principal component number', fontsize=30)
+    ax.set_ylabel('Percentage of \n variance explained', fontsize=30)
+    ax.set_ylim([-0.5, 100])
+    ax.set_xlim([-0.5, MaxPCs])
+    ax.grid("on")
 
-ax2 = ax.twinx()
-ax2.plot(pca_range[0:MaxPCs], evr_cumsum[0:MaxPCs] * 100, color="tomato", marker="D", ms=7)
-ax2.scatter(nPCs, cut_evr * 100, marker='*', s=500, facecolor='blue')
-ax2.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
-ax2.set_ylabel('Cumulative percentage', fontsize=30)
-ax2.set_ylim([-0.5, 100])
+    ax2 = ax.twinx()
+    ax2.plot(pca_range[0:MaxPCs], evr_cumsum[0:MaxPCs] * 100, color="tomato", marker="D", ms=7)
+    ax2.scatter(nPCs, cut_evr * 100, marker='*', s=500, facecolor='blue')
+    ax2.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+    ax2.set_ylabel('Cumulative percentage', fontsize=30)
+    ax2.set_ylim([-0.5, 100])
 
-# axis and tick theme
-ax.tick_params(axis="y", colors="steelblue")
-ax2.tick_params(axis="y", colors="tomato")
-ax.tick_params(size=10, color='black', labelsize=25)
-ax2.tick_params(size=10, color='black', labelsize=25)
-ax.tick_params(width=3)
-ax2.tick_params(width=3)
+    # axis and tick theme
+    ax.tick_params(axis="y", colors="steelblue")
+    ax2.tick_params(axis="y", colors="tomato")
+    ax.tick_params(size=10, color='black', labelsize=25)
+    ax2.tick_params(size=10, color='black', labelsize=25)
+    ax.tick_params(width=3)
+    ax2.tick_params(width=3)
 
-ax = plt.gca()  # Get the current Axes instance
+    ax = plt.gca()  # Get the current Axes instance
 
-for axis in ['top', 'bottom', 'left', 'right']:
-    ax.spines[axis].set_linewidth(3)
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(3)
 
-plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
-plt.show()
+    plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+    plt.show()
 
-nCl = 7     # todo: how?
-agg = AgglomerativeClustering(n_clusters=nCl)
-assignment = agg.fit_predict(reg_norm_ss)  # on pca
-# mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
-plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
-plt.title("Agglomerative Clustering")
-plt.show()
+    nCl = 7     # todo: how?
+    agg = AgglomerativeClustering(n_clusters=nCl)
+    assignment = agg.fit_predict(reg_norm_ss)  # on pca
+    # mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
+    plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    plt.title("Agglomerative Clustering")
+    plt.show()
 
-plt.figure(figsize=(12, 10), dpi=200)
-# plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
-# plt.scatter(df_pca.PC_1, df_pca.PC_2, c=assignment, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
-mglearn.discrete_scatter(df_pca.PC_1, df_pca.PC_2, assignment, alpha=0.5) #, labels=np.unique(assignment))
-plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
-plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
-plt.tick_params(size=10, color='black')
-# tick and axis theme
-plt.xticks(fontsize=20)
-plt.yticks(fontsize=20)
-# plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
-ax = plt.gca()  # Get the current Axes instance
-for axis in ['top', 'bottom', 'left', 'right']:
-    ax.spines[axis].set_linewidth(2)
-ax.tick_params(width=2)
-plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
-plt.show()
+    plt.figure(figsize=(12, 10), dpi=200)
+    # plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+    # plt.scatter(df_pca.PC_1, df_pca.PC_2, c=assignment, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+    mglearn.discrete_scatter(df_pca.PC_1, df_pca.PC_2, assignment, alpha=0.5) #, labels=np.unique(assignment))
+    plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
+    plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
+    plt.tick_params(size=10, color='black')
+    # tick and axis theme
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    # plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    ax = plt.gca()  # Get the current Axes instance
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(2)
+    ax.tick_params(width=2)
+    plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+    plt.show()
 
 
 # print("len(elements): {}, counts: {}".format(len(elements), counts))

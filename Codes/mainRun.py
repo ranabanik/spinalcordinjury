@@ -1,6 +1,7 @@
 import os
 import copy
 from glob import glob
+import math
 import numpy as np
 import pywt
 from Utilities import msmlfunc3, downSpatMS, matchSpecLabel2, ImzmlAll
@@ -15,6 +16,7 @@ import time
 from imzml import IMZMLExtract, normalize_spectrum
 from scipy import interpolate
 from pyimzml.ImzMLParser import ImzMLParser
+from ms_peak_picker import pick_peaks
 
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
 posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
@@ -22,12 +24,102 @@ mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 
 ImzObj = ImzmlAll(mspath)
+# print(len(ImzObj.parser.getspectrum(10)[0]))
 # ImzObj.find_regions()
+print(ImzObj.get_region(1))
+# array3D, array2D, longestmz, regCoor, regionshape = ImzObj.get_region(1)
 
-sarray, longestmz, _, _ = ImzObj.get_region(1)
-print(sarray.shape[2]//2)
-plt.imshow(sarray[..., sarray.shape[2]//2 + 560])
-plt.show()
+# print("regCoor >>", regCoor)
+# print("\n")
+# print("region shape >>", regionshape)
+
+# mz_ = np.random.randint(array3D.shape[2])
+# # print(array3D.shape[2]//2)
+# plt.imshow(array3D[..., mz_])
+# plt.title("Image at mz: {}".format(mz_))
+# plt.colorbar()
+# plt.show()
+#
+# print("array2D shape >> ", array2D.shape)
+#
+# meanSpec = np.mean(array2D, axis=0)
+# plt.plot(longestmz, meanSpec)
+# plt.show()
+#
+# picking_method = "quadratic"
+# # mz_array = np.array([23, 34])
+# # intensity_array = np.array([230, 340])
+# # peak_list = pick_peaks(longestmz, meanSpec, fit_type=picking_method)
+# snr = 3
+# intensity_threshold = 3
+# peak_list = pick_peaks(
+#     longestmz,
+#     meanSpec,
+#     fit_type=picking_method,
+#     signal_to_noise_threshold=snr,
+#     intensity_threshold=intensity_threshold,
+#     integrate=False,
+# )
+# print(peak_list)
+#
+# peak_mzs = [np.round(p.mz, 5) for p in peak_list]
+#
+# print("peak_mzs >> {} \n".format(len(peak_mzs)), peak_mzs)
+#
+# fwhm_expansion = 3  # todo: how?
+#
+# peak_ranges = [
+#     (
+#         p.mz - (p.full_width_at_half_max * fwhm_expansion),
+#         p.mz + (p.full_width_at_half_max * fwhm_expansion),
+#     )
+#     for p in peak_list]
+#
+# print("peak_ranges >> {} \n".format(len(peak_ranges)), peak_ranges)
+#
+# def find_nearest(array, value):
+#     idx = np.searchsorted(array, value, side="left") #Find indices
+#     if idx > 0 and (
+#         idx == len(array)
+#         or math.fabs(value - array[idx - 1]) < math.fabs(value - array[idx])
+#     ):
+#         return idx - 1
+#     else:
+#         return idx
+#
+# peak_indices = [
+#     (find_nearest(longestmz, p[0]), find_nearest(longestmz, p[1])) for p in peak_ranges
+# ]
+#
+# print("peak_indices >> {}\n".format(len(peak_indices)), peak_indices)
+#
+# spectra = []
+# for spectrum in array2D:
+#     peaks = []
+#     for p in peak_indices:
+#         peaks.append(np.sum(spectrum[p[0]: p[1]]))
+#     print("peaks len >> ", len(peaks))
+#     spectra.append(peaks)
+#
+# # print("peaks >> {}\n".format(len(peaks)))
+# plt.plot(peaks)
+# plt.show()
+# # print(peaks[20], peaks[200])
+#
+# print(len(spectra))
+#
+# spectra = np.array(spectra, dtype=np.float32)
+#
+# print(spectra.shape)
+#
+# plt.plot(spectra[3, ...])
+# plt.show()
+# plt.plot(spectra[30, ...])
+# plt.show()
+#
+# from Utilities import msmlfunc4
+#
+# msmlfunc4(spectra, regCoor, 0.95)
 
 def interpolate_spectrum(spec, masses, masses_new, method="Pchip"):
     """_summary_

@@ -69,56 +69,16 @@ class ImzmlAll(object):
         self.mspath = mspath
         self.parser = ImzMLParser(mspath)   # this is ImzObj
 
-    def _coord2index(self):
-        coord2index = {}
+    def _global2index(self):
+        """
+        global coordinates: index
+        """
+        global2index = {}
         for sidx, coord in enumerate(self.parser.coordinates):
-            coord2index[coord] = sidx
-        return coord2index
+            global2index[coord] = sidx
+        return global2index
 
-    def get_region(self, regID):
-        regionCoords = defaultdict(list)
-        labeled_array, num_features = self.find_regions()
-        for x in range(0, labeled_array.shape[0]):
-            for y in range(0, labeled_array.shape[1]):
-                if labeled_array[x, y] == 0:
-                    continue
-                regionCoords[labeled_array[x, y]].append((x, y, 1))
-        regionPixels = regionCoords[regID]
-        # print("regionPixels >>", regionPixels) #  [(704, 180, 1), (705, 178, 1), ...
-        coord2index = self._coord2index()
-        longestmzlength = 0
-        for coord in regionPixels:
-            if self.parser.mzLengths[coord2index[coord]] > longestmzlength:
-                longestmzIdx = coord2index[coord]
-                longestmzlength = self.parser.mzLengths[coord2index[coord]]
-
-        minx = min([x[0] for x in regionPixels])
-        maxx = max([x[0] for x in regionPixels])
-        miny = min([x[1] for x in regionPixels])
-        maxy = max([x[1] for x in regionPixels])
-        minz = min([x[2] for x in regionPixels])
-        maxz = max([x[2] for x in regionPixels])
-
-        regionshape = [maxx-minx+1,
-                       maxy-miny+1]
-        if maxz-minz+1 > 1:
-            regionshape.append(maxz-minz+1)
-
-        regionshape.append(longestmzlength)
-
-        array3D = np.zeros(regionshape, dtype=np.float32)
-        array2D = np.zeros(len(regionPixels), longestmzlength, dtype=np.float32)
-        longestmz = self.parser.getspectrum(longestmzIdx)[0]
-        for idx, coord in enumerate(regionPixels):
-            xpos = coord[0] - minx
-            ypos = coord[1] - miny
-            spectra = self.parser.getspectrum(coord2index[coord])
-            interp_spectra = interpolate_spectrum(spectra[1], spectra[0], longestmz, method='Pchip')
-            array3D[xpos, ypos, :] = interp_spectra
-            array2D[idx, :] = interp_spectra
-        return array3D, array2D, longestmz, regionPixels, regionshape
-
-    def find_regions(self):
+    def get_regions(self):
         maxX = 0
         maxY = 0
         for idx, coord in enumerate(self.parser.coordinates):
@@ -132,6 +92,62 @@ class ImzmlAll(object):
         labeled_array, num_features = ndimage.label(img, structure=np.ones((3, 3)))
         # print("There are {} regions.".format(num_features))
         return labeled_array, num_features
+
+    def get_region_pixels(self, regID):
+        regionCoords = defaultdict(list)
+        labeled_array, num_features = self.get_regions()
+        for x in range(0, labeled_array.shape[0]):
+            for y in range(0, labeled_array.shape[1]):
+                if labeled_array[x, y] == 0:
+                    continue
+                regionCoords[labeled_array[x, y]].append((x, y, 1))
+        regionPixels = regionCoords[regID]  # [(704, 180, 1), (705, 178, 1), ...
+        return regionPixels
+
+    def get_region_range(self, regID):
+        regionPixels = self.get_region_pixels(regID)
+        minx = min([x[0] for x in regionPixels])
+        maxx = max([x[0] for x in regionPixels])
+        miny = min([x[1] for x in regionPixels])
+        maxy = max([x[1] for x in regionPixels])
+        minz = min([x[2] for x in regionPixels])
+        maxz = max([x[2] for x in regionPixels])
+
+        gcoord2index = self._global2index()
+        spectralength = 0
+        mzidx = 0
+        for coord in regionPixels:
+            if self.parser.mzLengths[gcoord2index[coord]] > spectralength:
+                mzidx = gcoord2index[coord]
+                spectralength = self.parser.mzLengths[gcoord2index[coord]]
+            # spectralength = max(spectralength,
+            #                       self.parser.mzLengths[gcoord2index[coord]])
+        return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
+
+    def get_region(self, regID):
+        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID)
+
+        regionshape = [maxx-minx+1,
+                       maxy-miny+1]
+        if maxz-minz+1 > 1:
+            regionshape.append(maxz-minz+1)
+
+        regionshape.append(spectralength)
+        regionPixels = self.get_region_pixels(regID)
+        gcoord2index = self._global2index()
+        array3D = np.zeros(regionshape, dtype=np.float32)
+        array2D = np.zeros([len(regionPixels), spectralength], dtype=np.float32)
+        longestmz = self.parser.getspectrum(mzidx)[0]
+        # regCoor = np.zeros([len(regionPixels), 2])
+        for idx, coord in enumerate(regionPixels):
+            xpos = coord[0] - minx
+            ypos = coord[1] - miny
+            # regCoor[idx, 0], regCoor[idx, 1] = xpos, ypos
+            spectra = self.parser.getspectrum(gcoord2index[coord])
+            interp_spectra = interpolate_spectrum(spectra[1], spectra[0], longestmz, method='Pchip')
+            array3D[xpos, ypos, :] = interp_spectra
+            array2D[idx, :] = interp_spectra
+        return array3D, array2D, longestmz, regionshape # regionPixels
 
 
 class MaldiTofSpectrum(np.ndarray):
@@ -1613,6 +1629,121 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
             namepy = os.path.join(regDir, '{}_{}.npy'.format(exprun, columnName))
             np.save(namepy, sarray1)
     return
+
+def msmlfunc4(regSpec, regCoor, threshold): # 2D
+    plot_spec = True
+    plot_pca = True
+    RandomState = 20210131
+    nSpecs, nBins = regSpec.shape
+    # +------------------------------+
+    # |   normalize, standardize     |
+    # +------------------------------+
+    reg_norm = np.zeros_like(regSpec)
+    for s in range(nSpecs):
+        reg_norm[s, :] = normalize_spectrum(regSpec[s, :], normalize='tic')     #reg_smooth_
+        reg_norm[s, :] = _smooth_spectrum(reg_norm[s, :], method='savgol', window_length=5, polyorder=2)
+    reg_norm_ss = makeSS(reg_norm).astype(np.float64)
+    # +----------------+
+    # |  plot spectra  |
+    # +----------------+
+    if plot_spec:
+        nS = np.random.randint(nSpecs)
+        fig, ax = plt.subplots(5, 1, figsize=(16, 10), dpi=200)
+        ax[0].plot(regSpec[nS, :])
+        ax[0].set_title("raw spectrum")
+        ax[1].plot(reg_norm[nS, :])
+        ax[1].set_title("'tic' norm")
+        ax[2].plot(reg_norm_ss[nS, :])
+        ax[2].set_title("standardized")
+        ax[3].plot(np.mean(regSpec, axis=0))
+        ax[3].set_title("mean spectra(region {})")
+        # ax[4].plot(reg_smooth_[nS, :])
+        # ax[4].set_title("Smoothed...")
+        plt.suptitle("Processing comparison of Spec #{}".format(nS))
+        plt.show()
+
+    data = copy.deepcopy(reg_norm_ss)
+    # +------------+
+    # |    PCA     |
+    # +------------+
+    pca = PCA(random_state=RandomState)  # pca object
+    pcs = pca.fit_transform(data)  # (4587, 2000)
+    # pcs=pca.fit_transform(oldLipid_mm_norm)
+    pca_range = np.arange(1, pca.n_components_, 1)
+    print(">> PCA: number of components #{}".format(pca.n_components_))
+    # printStat(pcs)
+    evr = pca.explained_variance_ratio_
+    # print(evr)
+    evr_cumsum = np.cumsum(evr)
+    # print(evr_cumsum)
+    cut_evr = find_nearest(evr_cumsum, threshold)
+    nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
+    print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
+    df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
+
+    # +------------------------------+
+    # |   Agglomerating Clustering   |
+    # +------------------------------+
+    nCl = 7     # todo: how?
+    agg = AgglomerativeClustering(n_clusters=nCl)
+    assignment = agg.fit_predict(regSpec)  # on pca
+    mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
+    plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    plt.title("Agglomerative Clustering")
+    plt.show()
+
+    if plot_pca:
+        MaxPCs = nPCs + 5
+        fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
+        ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
+        ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+        ax.set_xlabel('Principal component number', fontsize=30)
+        ax.set_ylabel('Percentage of \nvariance explained', fontsize=30)
+        ax.set_ylim([-0.5, 100])
+        ax.set_xlim([-0.5, MaxPCs])
+        ax.grid("on")
+
+        ax2 = ax.twinx()
+        ax2.plot(pca_range[0:MaxPCs], evr_cumsum[0:MaxPCs] * 100, color="tomato", marker="D", ms=7)
+        ax2.scatter(nPCs, cut_evr * 100, marker='*', s=500, facecolor='blue')
+        ax2.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+        ax2.set_ylabel('Cumulative percentage', fontsize=30)
+        ax2.set_ylim([-0.5, 100])
+
+        # axis and tick theme
+        ax.tick_params(axis="y", colors="steelblue")
+        ax2.tick_params(axis="y", colors="tomato")
+        ax.tick_params(size=10, color='black', labelsize=25)
+        ax2.tick_params(size=10, color='black', labelsize=25)
+        ax.tick_params(width=3)
+        ax2.tick_params(width=3)
+
+        ax = plt.gca()  # Get the current Axes instance
+
+        for axis in ['top', 'bottom', 'left', 'right']:
+            ax.spines[axis].set_linewidth(3)
+
+        plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+        plt.show()
+
+        plt.figure(figsize=(12, 10), dpi=200)
+        # plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+        # plt.scatter(df_pca.PC_1, df_pca.PC_2, c=assignment, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+        mglearn.discrete_scatter(df_pca.PC_1, df_pca.PC_2, assignment, alpha=0.5) #, labels=np.unique(assignment))
+        plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
+        plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
+        plt.tick_params(size=10, color='black')
+        # tick and axis theme
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
+        plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+        ax = plt.gca()  # Get the current Axes instance
+        for axis in ['top', 'bottom', 'left', 'right']:
+            ax.spines[axis].set_linewidth(2)
+        ax.tick_params(width=2)
+        plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+        plt.show()
+
 
 def madev(d, axis=None):
     """ Mean absolute deviation of a signal """

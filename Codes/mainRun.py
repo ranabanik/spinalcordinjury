@@ -26,12 +26,24 @@ print(mspath)
 ImzObj = ImzmlAll(mspath)
 # print(len(ImzObj.parser.getspectrum(10)[0]))
 # ImzObj.find_regions()
-print(ImzObj.get_region(1))
-# array3D, array2D, longestmz, regCoor, regionshape = ImzObj.get_region(1)
+# print(ImzObj.get_region(1))
+array3D, array2D, longestmz, regionshape, regCoor = ImzObj.get_region(1)
 
 # print("regCoor >>", regCoor)
-# print("\n")
-# print("region shape >>", regionshape)
+# print(regCoor[34])
+# # print("\n")
+# # print("region shape >>", regionshape)
+
+
+spectra, peakmzs = ImzObj.preprocessing(array2D, longestmz)
+print("spectra >> ", spectra)
+
+sIdx = np.random.randint(spectra.shape[0])
+plt.plot(ImzObj.parser.getspectrum(regCoor[sIdx][0])[0],
+         ImzObj.parser.getspectrum(regCoor[sIdx][0])[1])
+plt.show()
+plt.plot(spectra[sIdx])
+plt.show()
 
 # mz_ = np.random.randint(array3D.shape[2])
 # # print(array3D.shape[2]//2)
@@ -120,38 +132,6 @@ print(ImzObj.get_region(1))
 # from Utilities import msmlfunc4
 #
 # msmlfunc4(spectra, regCoor, 0.95)
-
-def interpolate_spectrum(spec, masses, masses_new, method="Pchip"):
-    """_summary_
-
-    Args:
-        spec (list/numpy.array, optional): spectrum
-        masses (list): list of corresponding m/z values (same length as spectra)
-        masses_new (list): list of m/z values
-        method (str, optional):  Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
-
-    Returns:
-        lisr: updated spectrum
-    """
-    if method == "akima":
-        f = interpolate.Akima1DInterpolator(masses, spec)
-        specNew = f(masses_new)
-    elif method == "interp1d":
-        f = interpolate.interp1d(masses, spec)
-        specNew = f(masses_new)
-    elif method == "CubicSpline":
-        f = interpolate.CubicSpline(masses, spec)
-        specNew = f(masses_new)
-    elif method == "Pchip":
-        f = interpolate.PchipInterpolator(masses, spec)
-        specNew = f(masses_new)
-    elif method == "Barycentric":
-        f = interpolate.BarycentricInterpolator(masses, spec)
-        specNew = f(masses_new)
-    else:
-        raise Exception("Unknown interpolation method")
-
-    return specNew
 
 def regResamp(mspath, regID): #>> ImzObj,
     """

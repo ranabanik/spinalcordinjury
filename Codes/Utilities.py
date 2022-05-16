@@ -1,5 +1,6 @@
 import os
 import time
+import math
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 import pandas as pd
@@ -24,6 +25,7 @@ import matplotlib as mtl
 import matplotlib.cm as cm
 import seaborn as sns
 from pyimzml.ImzMLParser import ImzMLParser
+from ms_peak_picker import pick_peaks
 from imzml import IMZMLExtract, normalize_spectrum
 from matchms import Spectrum, calculate_scores
 from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
@@ -31,43 +33,50 @@ from tqdm import tqdm
 import joblib
 from collections import defaultdict
 
-def interpolate_spectrum(spec, masses, masses_new, method="Pchip"):
-    """_summary_
-
-    Args:
-        spec (list/numpy.array, optional): spectrum
-        masses (list): list of corresponding m/z values (same length as spectra)
-        masses_new (list): list of m/z values
-        method (str, optional):  Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
-
-    Returns:
-        lisr: updatedd spectrum
-    """
-    if method == "akima":
-        f = interpolate.Akima1DInterpolator(masses, spec)
-        specNew = f(masses_new)
-    elif method == "interp1d":
-        f = interpolate.interp1d(masses, spec)
-        specNew = f(masses_new)
-    elif method == "CubicSpline":
-        f = interpolate.CubicSpline(masses, spec)
-        specNew = f(masses_new)
-    elif method == "Pchip":
-        f = interpolate.PchipInterpolator(masses, spec)
-        specNew = f(masses_new)
-    elif method == "Barycentric":
-        f = interpolate.BarycentricInterpolator(masses, spec)
-        specNew = f(masses_new)
-    else:
-        raise Exception("Unknown interpolation method")
-
-    return specNew
-
-#TODO: create my better ImzMLExtract based on pyImzml
 class ImzmlAll(object):
     def __init__(self, mspath):
         self.mspath = mspath
         self.parser = ImzMLParser(mspath)   # this is ImzObj
+
+    def _find_nearest(self, array, value):
+        idx = np.searchsorted(array, value, side="left")  # Find indices
+        if idx > 0 and (
+                idx == len(array)
+                or math.fabs(value - array[idx - 1]) < math.fabs(value - array[idx])
+        ):
+            return idx - 1
+        else:
+            return idx
+
+    def _interpolate_spectrum(self, spec, masses, masses_new, method="Pchip"):
+        """
+        Args:
+            spec (list/numpy.array, optional): spectrum
+            masses (list): list of corresponding m/z values (same length as spectra)
+            masses_new (list): list of m/z values
+            method (str, optional):  Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
+
+        Returns:
+            lisr: updatedd spectrum
+        """
+        if method == "akima":
+            f = interpolate.Akima1DInterpolator(masses, spec)
+            specNew = f(masses_new)
+        elif method == "interp1d":
+            f = interpolate.interp1d(masses, spec)
+            specNew = f(masses_new)
+        elif method == "CubicSpline":
+            f = interpolate.CubicSpline(masses, spec)
+            specNew = f(masses_new)
+        elif method == "Pchip":
+            f = interpolate.PchipInterpolator(masses, spec)
+            specNew = f(masses_new)
+        elif method == "Barycentric":
+            f = interpolate.BarycentricInterpolator(masses, spec)
+            specNew = f(masses_new)
+        else:
+            raise Exception("Unknown interpolation method")
+        return specNew
 
     def _global2index(self):
         """
@@ -139,16 +148,51 @@ class ImzmlAll(object):
         array2D = np.zeros([len(regionPixels), spectralength], dtype=np.float32)
         longestmz = self.parser.getspectrum(mzidx)[0]
         # regCoor = np.zeros([len(regionPixels), 2])
+        lCoorIdx = defaultdict(list)
         for idx, coord in enumerate(regionPixels):
             xpos = coord[0] - minx
             ypos = coord[1] - miny
             # regCoor[idx, 0], regCoor[idx, 1] = xpos, ypos
             spectra = self.parser.getspectrum(gcoord2index[coord])
-            interp_spectra = interpolate_spectrum(spectra[1], spectra[0], longestmz, method='Pchip')
+            interp_spectra = self._interpolate_spectrum(spectra[1], spectra[0], longestmz, method='Pchip')
             array3D[xpos, ypos, :] = interp_spectra
             array2D[idx, :] = interp_spectra
-        return array3D, array2D, longestmz, regionshape # regionPixels
+            lCoorIdx[idx].append(gcoord2index[coord])
+        return array3D, array2D, longestmz, regionshape, lCoorIdx # regionPixels
 
+    def preprocessing(self, spectra, refmz):
+        """
+        by peak_picking ...
+        """
+        picking_method = "quadratic"
+        snr = 3
+        intensity_threshold = 3
+        fwhm_expansion = 3  # todo: how these values are set?
+        meanSpec = np.mean(spectra, axis=0)
+        peak_list = pick_peaks(refmz,
+                               meanSpec,
+                               fit_type=picking_method,
+                               signal_to_noise_threshold=snr,
+                               intensity_threshold=intensity_threshold,
+                               integrate=False)
+        peak_mzs = [np.round(p.mz, 5) for p in peak_list]   # only for visualisation
+        peak_ranges = [
+            (
+                p.mz - (p.full_width_at_half_max * fwhm_expansion),
+                p.mz + (p.full_width_at_half_max * fwhm_expansion),
+            )
+            for p in peak_list]
+        peak_indices = [
+            (self._find_nearest(refmz, p[0]), self._find_nearest(refmz, p[1])) for p in peak_ranges
+        ]
+        spectra_ = []
+        for spectrum in spectra:
+            peaks = []
+            for p in peak_indices:
+                peaks.append(np.sum(spectrum[p[0]: p[1]]))
+            spectra_.append(peaks)
+        spectra = np.array(spectra_, dtype=np.float32)
+        return spectra, peak_mzs
 
 class MaldiTofSpectrum(np.ndarray):
     """Numpy NDArray subclass representing a MALDI-TOF Spectrum."""

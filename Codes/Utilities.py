@@ -8,6 +8,7 @@ import copy
 import plotly.express as px
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import h5py
 from scipy.io import loadmat, savemat
 from scipy import ndimage, signal, interpolate
 from scipy.spatial.distance import cosine
@@ -148,7 +149,7 @@ class ImzmlAll(object):
         array2D = np.zeros([len(regionPixels), spectralength], dtype=np.float32)
         longestmz = self.parser.getspectrum(mzidx)[0]
         # regCoor = np.zeros([len(regionPixels), 2])
-        lCoorIdx = defaultdict(list)
+        lCoorIdx = []#defaultdict(list)
         for idx, coord in enumerate(regionPixels):
             xpos = coord[0] - minx
             ypos = coord[1] - miny
@@ -157,7 +158,8 @@ class ImzmlAll(object):
             interp_spectra = self._interpolate_spectrum(spectra[1], spectra[0], longestmz, method='Pchip')
             array3D[xpos, ypos, :] = interp_spectra
             array2D[idx, :] = interp_spectra
-            lCoorIdx[idx].append(gcoord2index[coord])
+            # lCoorIdx[idx].append(gcoord2index[coord]) # {0: [1182], 1: [1266], 2: [1350], 3: [1434]
+            lCoorIdx.append((xpos, ypos))
         return array3D, array2D, longestmz, regionshape, lCoorIdx # regionPixels
 
     def preprocessing(self, spectra, refmz):
@@ -165,10 +167,12 @@ class ImzmlAll(object):
         by peak_picking ...
         """
         picking_method = "quadratic"
-        snr = 3
-        intensity_threshold = 3
-        fwhm_expansion = 3  # todo: how these values are set?
+        snr = 3     # standard
+        intensity_threshold = 0     # depends on instrument/ 0 -> more permissive
+        fwhm_expansion = 12    # shouldn't be more than 2; 1.2 - 1.4 is optimum
         meanSpec = np.mean(spectra, axis=0)
+        # plt.plot(refmz, meanSpec)
+        # plt.show()
         peak_list = pick_peaks(refmz,
                                meanSpec,
                                fit_type=picking_method,
@@ -206,10 +210,8 @@ class MaldiTofSpectrum(np.ndarray):
         """
         peaks = np.asarray(peaks).view(cls)
         if peaks.ndim != 2 or peaks.shape[1] != 2:
-            raise ValueError(
-                f'Input shape of {peaks.shape} does not match expected shape '
-                'for spectrum [n_peaks, 2].'
-            )
+            raise ValueError(f'Input shape of {peaks.shape} does not match expected shape '
+                'for spectrum [n_peaks, 2].')
         return peaks
 
     @property
@@ -1322,7 +1324,6 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     # +------------+
     pca = PCA(random_state=RandomState)     # pca object
     pcs = pca.fit_transform(data)   # (4587, 2000)
-    # pcs=pca.fit_transform(oldLipid_mm_norm)
     pca_range = np.arange(1, pca.n_components_, 1)
     print(">> PCA: number of components #{}".format(pca.n_components_))
     # printStat(pcs)
@@ -1338,13 +1339,13 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
     # # +------------------------------+
     # # |   Agglomerating Clustering   |
     # # +------------------------------+
-    # nCl = 7     # todo: how?
-    # agg = AgglomerativeClustering(n_clusters=nCl)
-    # assignment = agg.fit_predict(regSpec)  # on pca
-    # mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
-    # plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
-    # plt.title("Agglomerative Clustering")
-    # plt.show()
+    nCl = 7     # todo: how?
+    agg = AgglomerativeClustering(n_clusters=nCl)
+    assignment = agg.fit_predict(pcs)  # on pca
+    mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
+    plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    plt.title("Agglomerative Clustering")
+    plt.show()
     #
     # if plot_pca:
     #     MaxPCs = nPCs + 5
@@ -1674,17 +1675,47 @@ def msmlfunc3(mspath, regID, threshold, exprun=None, downsamp_i=None, wSize=[2,2
             np.save(namepy, sarray1)
     return
 
-def msmlfunc4(regSpec, regCoor, threshold): # 2D
+def msmlfunc4(mspath, regID, threshold, exprun):
+    """
+    performs ML on resampled and peak picked spectra
+    """
     plot_spec = True
     plot_pca = True
+    plot_umap = True
+    save_rseg = False
     RandomState = 20210131
-    nSpecs, nBins = regSpec.shape
+    # +------------------------------------+
+    # |     read data and save region      |
+    # +------------------------------------+
+    dirname = os.path.dirname(mspath)
+    basename = os.path.basename(mspath)
+    filename, ext = os.path.splitext(basename)
+    regDir = os.path.join(dirname, 'reg_{}'.format(regID))
+    if not os.path.isdir(regDir):
+        os.mkdir(regDir)
+    regname = os.path.join(regDir, '{}_reg_{}.h5'.format(filename, regID))
+    if os.path.isfile(regname):
+        f = h5py.File(regname, 'r')
+        spectra = f['spectra']
+        localCoor = f['coordinates']
+        regionshape = f['regionshape']
+        peakmzs = f['peakmzs']
+    else:
+        ImzObj = ImzmlAll(mspath)
+        spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID)
+        spectra, peakmzs = ImzObj.preprocessing(spectra, refmz)
+        with h5py.File(regname, 'w') as pfile:
+            pfile['spectra'] = spectra
+            pfile['coordinates'] = localCoor
+            pfile['regionshape'] = regionshape
+            pfile['peakmzs'] = peakmzs
+    nSpecs, nBins = spectra.shape
     # +------------------------------+
     # |   normalize, standardize     |
     # +------------------------------+
-    reg_norm = np.zeros_like(regSpec)
+    reg_norm = np.zeros_like(spectra)
     for s in range(nSpecs):
-        reg_norm[s, :] = normalize_spectrum(regSpec[s, :], normalize='tic')     #reg_smooth_
+        reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='tic')     #reg_smooth_
         reg_norm[s, :] = _smooth_spectrum(reg_norm[s, :], method='savgol', window_length=5, polyorder=2)
     reg_norm_ss = makeSS(reg_norm).astype(np.float64)
     # +----------------+
@@ -1693,13 +1724,13 @@ def msmlfunc4(regSpec, regCoor, threshold): # 2D
     if plot_spec:
         nS = np.random.randint(nSpecs)
         fig, ax = plt.subplots(5, 1, figsize=(16, 10), dpi=200)
-        ax[0].plot(regSpec[nS, :])
+        ax[0].plot(spectra[nS, :])
         ax[0].set_title("raw spectrum")
         ax[1].plot(reg_norm[nS, :])
         ax[1].set_title("'tic' norm")
         ax[2].plot(reg_norm_ss[nS, :])
         ax[2].set_title("standardized")
-        ax[3].plot(np.mean(regSpec, axis=0))
+        ax[3].plot(np.mean(spectra, axis=0))
         ax[3].set_title("mean spectra(region {})")
         # ax[4].plot(reg_smooth_[nS, :])
         # ax[4].set_title("Smoothed...")
@@ -1728,12 +1759,19 @@ def msmlfunc4(regSpec, regCoor, threshold): # 2D
     # +------------------------------+
     # |   Agglomerating Clustering   |
     # +------------------------------+
-    nCl = 7     # todo: how?
+    nCl = 4     # todo: how?
     agg = AgglomerativeClustering(n_clusters=nCl)
-    assignment = agg.fit_predict(regSpec)  # on pca
-    mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
+    assignment = agg.fit_predict(pcs)  # on pca
+    mglearn.discrete_scatter(np.array([i[0] for i in localCoor]),
+                             np.array([i[1] for i in localCoor]), assignment, labels=np.unique(assignment))
     plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
     plt.title("Agglomerative Clustering")
+    plt.show()
+    seg = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+    for idx, coor in enumerate(localCoor):
+        seg[coor[0], coor[1]] = assignment[idx] + 1
+    plt.imshow(seg)
+    plt.title("Agglomerative segmentation")
     plt.show()
 
     if plot_pca:
@@ -1787,6 +1825,240 @@ def msmlfunc4(regSpec, regCoor, threshold): # 2D
         ax.tick_params(width=2)
         plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
         plt.show()
+
+    # +-------------------+
+    # |   HC_clustering   |
+    # +-------------------+
+    HC_method = 'ward'
+    HC_metric = 'euclidean'
+    Y = sch.linkage(df_pca.values, method=HC_method, metric=HC_metric)
+    Z = sch.dendrogram(Y, no_plot=True)
+    HC_idx = Z['leaves']
+    HC_idx = np.array(HC_idx)
+
+    # plot it
+    thre_dist = 375  # TODO: how to fix it?
+    plt.figure(figsize=(15, 10))
+    Z = sch.dendrogram(Y, color_threshold=thre_dist)
+    plt.title('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
+        HC_method, HC_metric, thre_dist))
+
+    ## 2. sort features with clustering results
+    features_modi_sorted = df_pca.values[HC_idx]
+
+    # plot it
+    fig = plt.figure(figsize=(10, 10))
+    axmatrix = fig.add_axes([0.10, 0, 0.80, 0.80])
+    im = axmatrix.matshow(features_modi_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
+    fig.gca().invert_yaxis()
+
+    # colorbar
+    axcolor = fig.add_axes([0.96, 0, 0.02, 0.80])
+    cbar = plt.colorbar(im, cax=axcolor)
+    axcolor.tick_params(labelsize=10)
+    plt.show()
+
+ # +------------------+
+    # |      UMAP        |
+    # +------------------+
+    u_neigh = 12    # from grid-parameter search in Hang Hu paper(visual plot)
+    u_comp = 3
+    u_min_dist = 0.025  # from grid-param Hang Hu paper(visual plot)
+    reducer = UMAP(n_neighbors=u_neigh,
+                   # default 15, The size of local neighborhood (in terms of number of neighboring sample points) used for manifold approximation.
+                   n_components=u_comp,  # default 2, The dimension of the space to embed into.
+                   metric='cosine',
+                   # default 'euclidean', The metric to use to compute distances in high dimensional space.
+                   n_epochs=1000,
+                   # default None, The number of training epochs to be used in optimizing the low dimensional embedding. Larger values result in more accurate embeddings.
+                   learning_rate=1.0,  # default 1.0, The initial learning rate for the embedding optimization.
+                   init='spectral',
+                   # default 'spectral', How to initialize the low dimensional embedding. Options are: {'spectral', 'random', A numpy array of initial embedding positions}.
+                   min_dist=u_min_dist,  # default 0.1, The effective minimum distance between embedded points.
+                   spread=1.0,
+                   # default 1.0, The effective scale of embedded points. In combination with ``min_dist`` this determines how clustered/clumped the embedded points are.
+                   low_memory=False,
+                   # default False, For some datasets the nearest neighbor computation can consume a lot of memory. If you find that UMAP is failing due to memory constraints consider setting this option to True.
+                   set_op_mix_ratio=1.0,
+                   # default 1.0, The value of this parameter should be between 0.0 and 1.0; a value of 1.0 will use a pure fuzzy union, while 0.0 will use a pure fuzzy intersection.
+                   local_connectivity=1,
+                   # default 1, The local connectivity required -- i.e. the number of nearest neighbors that should be assumed to be connected at a local level.
+                   repulsion_strength=1.0,
+                   # default 1.0, Weighting applied to negative samples in low dimensional embedding optimization.
+                   negative_sample_rate=5,
+                   # default 5, Increasing this value will result in greater repulsive force being applied, greater optimization cost, but slightly more accuracy.
+                   transform_queue_size=4.0,
+                   # default 4.0, Larger values will result in slower performance but more accurate nearest neighbor evaluation.
+                   a=None,
+                   # default None, More specific parameters controlling the embedding. If None these values are set automatically as determined by ``min_dist`` and ``spread``.
+                   b=None,
+                   # default None, More specific parameters controlling the embedding. If None these values are set automatically as determined by ``min_dist`` and ``spread``.
+                   random_state=RandomState,
+                   # default: None, If int, random_state is the seed used by the random number generator;
+                   metric_kwds=None,
+                   # default None) Arguments to pass on to the metric, such as the ``p`` value for Minkowski distance.
+                   angular_rp_forest=False,
+                   # default False, Whether to use an angular random projection forest to initialise the approximate nearest neighbor search.
+                   target_n_neighbors=-1,
+                   # default -1, The number of nearest neighbors to use to construct the target simplcial set. If set to -1 use the ``n_neighbors`` value.
+                   # target_metric='categorical', # default 'categorical', The metric used to measure distance for a target array is using supervised dimension reduction. By default this is 'categorical' which will measure distance in terms of whether categories match or are different.
+                   # target_metric_kwds=None, # dict, default None, Keyword argument to pass to the target metric when performing supervised dimension reduction. If None then no arguments are passed on.
+                   # target_weight=0.5, # default 0.5, weighting factor between data topology and target topology.
+                   transform_seed=42,
+                   # default 42, Random seed used for the stochastic aspects of the transform operation.
+                   verbose=True,  # default False, Controls verbosity of logging.
+                   unique=False
+                   # default False, Controls if the rows of your data should be uniqued before being embedded.
+                   )
+    data_umap = reducer.fit_transform(data) #df_pca.values)  # on pca
+    for i in range(reducer.n_components):
+        df_pca.insert(df_pca.shape[1], column='umap_{}'.format(i + 1), value=data_umap[:, i])
+    df_pca_umap = copy.deepcopy(df_pca)
+    # +---------------+
+    # |   UMAP plot   |
+    # +---------------+
+    if plot_umap:
+        plt.figure(figsize=(12, 10))
+        plt.scatter(data_umap[:, 0], data_umap[:, 1], facecolors='None', edgecolors=cm.tab20(10), alpha=0.5)
+        plt.xlabel('UMAP1', fontsize=30)  # only difference part from last one
+        plt.ylabel('UMAP2', fontsize=30)
+
+        # theme
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
+        plt.tick_params(size=10, color='black')
+
+        ax = plt.gca()  # Get the current Axes instance
+
+        for axis in ['top', 'bottom', 'left', 'right']:
+            ax.spines[axis].set_linewidth(3)
+        ax.tick_params(width=3)
+        plt.show()
+
+    # +-------------+
+    # |   HDBSCAN   |
+    # +-------------+
+    HDBSCAN_soft = False
+    min_cluster_size = 250
+    min_samples = 30
+    cluster_selection_method = 'eom'  # eom
+    if HDBSCAN_soft:
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
+                                    cluster_selection_method=cluster_selection_method, prediction_data=True) \
+            .fit(data_umap)
+        soft_clusters = hdbscan.all_points_membership_vectors(clusterer)
+        labels = np.argmax(soft_clusters, axis=1)
+    else:
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
+                                    cluster_selection_method=cluster_selection_method).fit(data_umap)
+        labels = clusterer.labels_
+
+    # process HDBSCAN data
+    n_clusters_est = np.max(labels) + 1
+    if HDBSCAN_soft:
+        title = 'estimated number of clusters: ' + str(n_clusters_est)
+    else:
+        labels[labels == -1] = 19
+        title = 'estimated number of clusters: ' + str(n_clusters_est) + ', noise pixels are coded in cyan'
+    # plot
+    plt.figure(figsize=(12, 10))
+    plt.scatter(data_umap[:, 0], data_umap[:, 1], facecolors='None', edgecolors=cm.tab20(labels), alpha=0.9)
+    plt.xlabel('UMAP1', fontsize=30)  # only difference part from last one
+    plt.ylabel('UMAP2', fontsize=30)
+
+    # theme
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.tick_params(size=10, color='black')
+    plt.title(title, fontsize=20)
+
+    ax = plt.gca()  # Get the current Axes instance
+
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(3)
+    ax.tick_params(width=3)
+    plt.show()
+
+    chart(data_umap, labels)
+    plt.suptitle("n_neighbors={}, Cosine metric".format(u_neigh))
+    # plt.show()
+
+    df_pca_umap.insert(df_pca_umap.shape[1], column='hdbscan_labels', value=labels)
+    df_pca_umap_hdbscan = copy.deepcopy(df_pca_umap)
+
+    # +--------------------------------------+
+    # |   Segmentation on PCA+UMAP+HDBSCAN   |
+    # +--------------------------------------+
+    sarray = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+    for idx, coor in enumerate(localCoor):
+        sarray[coor[0], coor[1]] = labels[idx] + 1
+    # sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
+    try:
+        sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
+    except:
+        pass
+    fig, ax = plt.subplots(figsize=(6, 8))
+    sarrayIm = ax.imshow(sarray)
+    fig.colorbar(sarrayIm)
+    ax.set_title('reg{}: HDBSCAN labeling'.format(regID), fontsize=15, loc='center')
+    plt.show()
+    if save_rseg:
+        namepy = os.path.join(regDir, '{}_hdbscan-label.npy'.format(exprun))
+        np.save(namepy, sarray)
+
+    # +-----------------+
+    # |       GMM       |
+    # +-----------------+
+    n_components = 5
+    span = 5
+    n_component = _generate_nComponentList(n_components, span)
+    repeat = 2
+
+    for i in range(repeat):  # may repeat several times
+        for j in range(n_component.shape[0]):  # ensemble with different n_component value
+            StaTime = time.time()
+            gmm = GMM(n_components=n_component[j], max_iter=5000)  # max_iter does matter, no random seed assigned
+            labels = gmm.fit_predict(data_umap)     #todo data_umap
+            # save data
+            index = j + 1 + i * n_component.shape[0]
+            title = 'gmm_' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
+            # df_pixel_label[title] = labels
+
+            SpenTime = (time.time() - StaTime)
+
+            # progressbar
+            print('{}/{}, finish classifying {}, running time is: {} s'.format(index, repeat * span, title,
+                                        round(SpenTime, 2)))
+            df_pca_umap_hdbscan.insert(df_pca_umap_hdbscan.shape[1], column=title, value=labels)
+
+    df_pca_umap_hdbscan_gmm = copy.deepcopy(df_pca_umap_hdbscan)
+    if save_rseg:
+        savecsv = os.path.join(regDir, '{}.csv'.format(exprun))
+        df_pca_umap_hdbscan_gmm.to_csv(savecsv, index=False, sep=',')
+
+    nGs = retrace_columns(df_pca_umap_hdbscan_gmm.columns.values, 'gmm')
+    df_gmm_labels = df_pca_umap_hdbscan_gmm.iloc[:, -nGs:]
+    # print("gmm label: ", nGs)
+
+    for (columnName, columnData) in df_gmm_labels.iteritems():
+        print('Column Name : ', columnName)
+        print('Column Contents : ', np.unique(columnData.values))
+        # regInd = ImzObj.get_region_indices(regID)
+        # xr, yr, zr, _ = ImzObj.get_region_range(regID)
+        # xx, yy, _ = ImzObj.get_region_shape(regID)
+        sarray1 = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+        for idx, coor in enumerate(localCoor):
+            sarray1[coor[0], coor[1]] = columnData.values[idx] + 1
+        fig, ax = plt.subplots(figsize=(6, 8))
+        sarrayIm = ax.imshow(sarray1)
+        fig.colorbar(sarrayIm)
+        ax.set_title('reg{}: {}'.format(regID, columnName), fontsize=15, loc='center')
+        plt.show()
+        if save_rseg:
+            namepy = os.path.join(regDir, '{}_{}.npy'.format(exprun, columnName))
+            np.save(namepy, sarray1)
+    return
+
 
 
 def madev(d, axis=None):

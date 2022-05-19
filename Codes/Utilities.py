@@ -1858,7 +1858,7 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     axcolor.tick_params(labelsize=10)
     plt.show()
 
- # +------------------+
+    # +------------------+
     # |      UMAP        |
     # +------------------+
     u_neigh = 12    # from grid-parameter search in Hang Hu paper(visual plot)
@@ -1992,7 +1992,6 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     sarray = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
     for idx, coor in enumerate(localCoor):
         sarray[coor[0], coor[1]] = labels[idx] + 1
-    # sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
     try:
         sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
     except:
@@ -2299,7 +2298,7 @@ def downSpatMS(msArray, i_, wSize):
     # print(coordList_down)
     return msArray_down, spectra_down, coordList_down
 
-def matchSpecLabel(seg1, seg2, arr1, arr2, plot_fig=True): #TODO: implement for multi seg
+def matchSpecLabel(seg1, seg2, arr1, arr2, plot_fig=True): #Done: implement for multi seg
     """
     seg1 & seg2: segmentation file path(.npy)
     Comparison of segmentation between two region arrays

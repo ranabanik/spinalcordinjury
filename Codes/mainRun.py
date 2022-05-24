@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Utilities import msmlfunc4, downSpatMS, matchSpecLabel2, ImzmlAll
+from Utilities import msmlfunc4, downSpatMS, matchSpecLabel2, ImzmlAll, bestWvltForRegion
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -24,13 +24,42 @@ posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
 regID = 1
-ImzObj = ImzmlAll(mspath)
+# ImzObj = ImzmlAll(mspath)
 # spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID)
-# print(regionshape[0], regionshape[1])
+# smooth_spectra = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
+# peak_spectra1, peakmzs = ImzObj.peak_pick(spectra, refmz)
+# peak_spectra2, peakmzs = ImzObj.peak_pick(smooth_spectra, refmz)
+# from Utilities import normalize_spectrum
+# spec_norm = np.zeros_like(peak_spectra2)
+# for s in range(peak_spectra2.shape[0]):
+#     spec_norm[s, :] = normalize_spectrum(peak_spectra2[s, :], normalize='max_intensity_spectrum', max_region_value=None)
+# plt.subplot(511)
+# plt.plot(spectra[1200,...])
+# plt.subplot(512)
+# plt.plot(smooth_spectra[1200,...])
+# plt.subplot(513)
+# plt.plot(peak_spectra1[1200,...])
+# plt.subplot(514)
+# plt.plot(peak_spectra2[1200,...])
+# plt.subplot(515)
+# plt.plot(spec_norm[1200, ...])
+# plt.show()
+# print(peak_spectra1.shape)
+# print(peak_spectra2.shape)
 
+
+
+# print(regionshape[0], regionshape[1])
+# nS = np.random.randint(spectra.shape[0])
+# abraw = spectra[nS, :]
+
+# abpro = spectra_[nS, :]
+# _, reg_smooth_ = bestWvltForRegion(spectra, bestWvlt='db8', smoothed_array=True, plot_fig=True)
+# from Utilities import rawVSprocessed
+# rawVSprocessed(refmz, abraw, peakmzs, abpro)
+# print(reg_smooth_.shape)
 
 msmlfunc4(mspath, regID=regID, threshold=0.95, exprun='peak_picked')
-
 
 # msmlfunc3(mspath, regID=1, threshold=0.95, exprun='HC_ion_img', downsamp_i=None, wSize=None)
 
@@ -219,7 +248,7 @@ if __name__ != '__main__':
     plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
     plt.show()
 
-    nCl = 7     # todo: how?
+    nCl = 7
     agg = AgglomerativeClustering(n_clusters=nCl)
     assignment = agg.fit_predict(reg_norm_ss)  # on pca
     # mglearn.discrete_scatter(regCoor[:, 0], regCoor[:, 1], assignment, labels=np.unique(assignment))
@@ -450,29 +479,54 @@ if __name__ != '__main__':
     spec_array = spec_obj['array']
     matchSpecLabel2(True, seg_path, arr1=spec_array) #,
 
+# +-------------------------+
+# |  smoothing demo works   |
+# +-------------------------+
 if __name__ != '__main__':
+    from Utilities import wavelet_denoising
+
+    wvltList = pywt.wavelist()
+    discreteWvList = []
+    continuousWvList = []
+    for w in wvltList:
+        try:
+            w1 = pywt.Wavelet(w)
+            discreteWvList.append(w)
+        except:
+            # print(w, "is not discrete")
+            continuousWvList.append(w)
+            pass
+    print(discreteWvList)
     # wvltList = pywt.wavelist()
     # print(len(wvltList))
     # print(wvltList[23])
     # print(pywt.families())
     # for family in pywt.families():
     #     print(family, ' : ', pywt.wavelist(family))
-
+    nS = 1520 #np.random.randint(spectra.shape[0])
+    signal = copy.deepcopy(spectra[nS, :])
     fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
-    p = ax.plot(signal)
+    # p = ax.plot(signal, 'g')
+    p = ax.plot(signal, color=(0.9, 0, 0), linewidth=1.0, label='raw')
     # outspectrum = _smooth_spectrum(refSpec, method='savgol', window_length=wl_, polyorder=po_)
-    filtered = wavelet_denoising(signal, wavelet=discreteWvList[2]) #'bior4.4')
-    p, = ax.plot(filtered)
+    filtered = wavelet_denoising(signal, wavelet=discreteWvList[2])  #'bior4.4')
+    # p, = ax.plot(filtered)
+    p, = ax.plot(filtered, color=(0, 0, 1), linewidth=1.0, label='filtered', alpha=0.5)
     plt.subplots_adjust(bottom=0.25)
+    ax.set_xlabel("m/z(shifted)", fontsize=12)
+    ax.set_ylabel("intensity", fontsize=12)
+    ax.legend(loc='upper right')
     ax_slide = plt.axes([0.25, 0.1, 0.65, 0.03])
     wvlt = Slider(ax_slide, 'wavelet', valmin=0, valmax=len(discreteWvList)-1, valinit=0, valstep=1)
     print(wvlt.val)
     def update(val):
         current_wvlt = int(wvlt.val)
         print(discreteWvList[current_wvlt])
-        filtered = wavelet_denoising(signal, wavelet=discreteWvList(current_wvlt))  # 'bior4.4')
+        filtered = wavelet_denoising(signal, wavelet='db8') #discreteWvList(current_wvlt))  # 'bior4.4')
         p.set_ydata(filtered)
+        fig.suptitle('DWT #{} {}'.format(nS, discreteWvList(current_wvlt)), fontsize=12, y=1, fontweight='bold')
         fig.canvas.draw()
+
     # #     outspectrum = _smooth_spectrum(refSpec, method='savgol', window_length=current_v, polyorder=po_)
     wvlt.on_changed(update)
     plt.show()
@@ -483,11 +537,12 @@ if __name__ != '__main__':
 # |   demonstrate smoothing   |
 # +---------------------------+
 if __name__ != '__main__':
-    nS = np.random.randint(spectra_array.shape[0])
-    signal = copy.deepcopy(spectra_array[nS, :])
+    from Utilities import _smooth_spectrum
+    nS = 1520   # np.random.randint(spectra.shape[0])
+    signal = copy.deepcopy(spectra[nS, :])
     fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
     p = ax.plot(signal, color=(0.9, 0, 0), linewidth=1.0, label='raw')
-    wl_ = 3  # todo: 5 is better
+    wl_ = 5
     po_ = 2
     outspectrum = _smooth_spectrum(signal, method='savgol', window_length=wl_, polyorder=po_)
     p, = ax.plot(outspectrum, color=(0, 0, 1), linewidth=1.0, label='filtered', alpha=0.5)

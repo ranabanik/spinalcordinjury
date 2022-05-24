@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import h5py
 from scipy.io import loadmat, savemat
-from scipy import ndimage, signal, interpolate
+from scipy import ndimage, signal, interpolate, stats
 from scipy.spatial.distance import cosine
 import scipy.cluster.hierarchy as sch
 import pywt
@@ -27,7 +27,7 @@ import matplotlib.cm as cm
 import seaborn as sns
 from pyimzml.ImzMLParser import ImzMLParser
 from ms_peak_picker import pick_peaks
-from imzml import IMZMLExtract, normalize_spectrum
+# from imzml import IMZMLExtract, normalize_spectrum
 from matchms import Spectrum, calculate_scores
 from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
 from tqdm import tqdm
@@ -162,14 +162,30 @@ class ImzmlAll(object):
             lCoorIdx.append((xpos, ypos))
         return array3D, array2D, longestmz, regionshape, lCoorIdx # regionPixels
 
-    def preprocessing(self, spectra, refmz):
+    def smooth_spectra(self, spectra, method="savgol", window_length=5, polyorder=2):
+        assert (method in ["savgol", "gaussian"])
+        nSpecs = spectra.shape[0]
+        spectra_ = np.zeros_like(spectra)
+        if method == "savgol":
+            for s in range(nSpecs):
+                smoothspec = signal.savgol_filter(spectra[s, :], window_length=window_length, polyorder=polyorder, mode='nearest')
+                smoothspec[smoothspec < 0] = 0
+                spectra_[s, :] = smoothspec
+        elif method == "gaussian":
+            for s in range(nSpecs):
+                smoothspec = ndimage.gaussian_filter1d(spectra[s, :], sigma=window_length, mode='nearest')
+                smoothspec[smoothspec < 0] = 0
+                spectra_[s, :] = smoothspec
+        return spectra_
+
+    def peak_pick(self, spectra, refmz):
         """
         by peak_picking ...
         """
         picking_method = "quadratic"
-        snr = 3     # standard
-        intensity_threshold = 0     # depends on instrument/ 0 -> more permissive
-        fwhm_expansion = 12    # shouldn't be more than 2; 1.2 - 1.4 is optimum
+        snr = 30     # standard: higher value increases number of peaks
+        intensity_threshold = 5     # depends on instrument/ 0 -> more permissive
+        fwhm_expansion = 2    # shouldn't be more than 2; 1.2 - 1.4 is optimum
         meanSpec = np.mean(spectra, axis=0)
         # plt.plot(refmz, meanSpec)
         # plt.show()
@@ -186,6 +202,7 @@ class ImzmlAll(object):
                 p.mz + (p.full_width_at_half_max * fwhm_expansion),
             )
             for p in peak_list]
+        # print("peak ranges", peak_ranges)
         peak_indices = [
             (self._find_nearest(refmz, p[0]), self._find_nearest(refmz, p[1])) for p in peak_ranges
         ]
@@ -479,6 +496,61 @@ def find_nearest(array, value):
     idx = (np.abs(array - value)).argmin()
     return array[idx]
 
+def normalize_spectrum(spectrum, normalize=None, max_region_value=None):
+    """Normalizes a single spectrum.
+    Args:
+        spectrum (numpy.array): Spectrum to normalize.
+        normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "vector". Defaults to None.\n
+            - "max_intensity_spectrum": divides the spectrum by the maximum intensity value.\n
+            - "max_intensity_region"/"max_intensity_all_regions": divides the spectrum by custom max_region_value.\n
+            - "vector": divides the spectrum by its norm.\n
+            - "tic": divides the spectrum by its TIC (sum).\n
+        max_region_value (int/float, optional): Value to normalize to for max-region-intensity norm. Defaults to None.
+
+    Returns:
+        numpy.array: Normalized spectrum.
+    """
+    assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
+    retSpectrum = np.array(spectrum, copy=True)
+
+    # if normalize in ["max_intensity_region", "max_intensity_all_regions"]:
+    #     assert(max_region_value != None)
+
+    if normalize == "max_intensity_spectrum":
+        retSpectrum = retSpectrum / np.max(retSpectrum)
+        return retSpectrum
+
+    elif normalize == "max_intensity_region": #, "max_intensity_all_regions"]:
+        retSpectrum = retSpectrum / np.max(spectrum)
+        return retSpectrum
+
+    elif normalize == "tic":
+        specSum = sum(retSpectrum)
+        if specSum > 0:
+            retSpectrum = (retSpectrum / specSum) #* len(retSpectrum)
+        return retSpectrum
+
+    elif normalize in ["zscore"]:
+        lspec = list(retSpectrum)
+        nlspec = list(-retSpectrum)
+        retSpectrum = np.array(stats.zscore(lspec + nlspec, nan_policy="omit")[:len(lspec)])
+        retSpectrum = np.nan_to_num(retSpectrum)
+        assert(len(retSpectrum) == len(lspec))
+        return retSpectrum
+
+    elif normalize == ["vector"]:
+        slen = np.linalg.norm(retSpectrum)
+        if slen < 0.01:
+            retSpectrum = retSpectrum * 0
+        else:
+            retSpectrum = retSpectrum / slen
+        #with very small spectra it can happen that due to norm the baseline is shifted up!
+        retSpectrum[retSpectrum < 0.0] = 0.0
+        retSpectrum = retSpectrum - np.min(retSpectrum)
+        if not np.linalg.norm(retSpectrum) <= 1.01:
+            print(slen, np.linalg.norm(retSpectrum))
+        return retSpectrum
+
 def makeSS(x):
     """
     x : the signal/data to standardized
@@ -497,6 +569,8 @@ def _smooth_spectrum(spectrum, method="savgol", window_length=5, polyorder=2):
         outspectrum = ndimage.gaussian_filter1d(spectrum, sigma=window_length, mode='nearest')
     outspectrum[outspectrum < 0] = 0
     return outspectrum
+
+
 
 def nnPixelCorrect(arr, n_, d, bg_=0, plot_=True):
     """
@@ -1703,7 +1777,8 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     else:
         ImzObj = ImzmlAll(mspath)
         spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID)
-        spectra, peakmzs = ImzObj.preprocessing(spectra, refmz)
+        spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
+        spectra, peakmzs = ImzObj.preprocessing(spectra_smoothed, refmz)
         with h5py.File(regname, 'w') as pfile:
             pfile['spectra'] = spectra
             pfile['coordinates'] = localCoor
@@ -1713,10 +1788,10 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     # +------------------------------+
     # |   normalize, standardize     |
     # +------------------------------+
+    # _, reg_smooth_, _ = bestWvltForRegion(regSpec, bestWvlt='db8', smoothed_array=True, plot_fig=False)
     reg_norm = np.zeros_like(spectra)
     for s in range(nSpecs):
-        reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='tic')     #reg_smooth_
-        reg_norm[s, :] = _smooth_spectrum(reg_norm[s, :], method='savgol', window_length=5, polyorder=2)
+        reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='max_intensity_region')     #reg_smooth_
     reg_norm_ss = makeSS(reg_norm).astype(np.float64)
     # +----------------+
     # |  plot spectra  |
@@ -1759,7 +1834,7 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     # +------------------------------+
     # |   Agglomerating Clustering   |
     # +------------------------------+
-    nCl = 4     # todo: how?
+    nCl = 4
     agg = AgglomerativeClustering(n_clusters=nCl)
     assignment = agg.fit_predict(pcs)  # on pca
     mglearn.discrete_scatter(np.array([i[0] for i in localCoor]),
@@ -1858,6 +1933,31 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     axcolor.tick_params(labelsize=10)
     plt.show()
 
+    HC_labels = sch.fcluster(Y, thre_dist, criterion='distance')
+    # prepare label data
+    elements, counts = np.unique(HC_labels, return_counts=True)
+    print(elements, counts)
+
+    if __name__ != '__main__':
+        loadings = pca.components_.T
+        SSL = np.sum(loadings ** 2, axis=1)
+        mean_imgs = []
+        total_SSLs = []
+        # img_std =
+        for label in elements:
+            idx = np.where(HC_labels == label)[0]
+
+            # total SSL
+            total_SSL = np.sum(SSL[idx])
+            print(total_SSL)
+            # imgs in the cluster
+            # current_cluster = imgs_std[idx]
+            # average img
+            # mean_img = np.mean(imgs_std[idx], axis=0)
+
+            # accumulate data
+            total_SSLs.append(total_SSL)
+            # mean_imgs.append(mean_img)
     # +------------------+
     # |      UMAP        |
     # +------------------+
@@ -2066,8 +2166,8 @@ def madev(d, axis=None):
 
 def wavelet_denoising(x, wavelet=None, level=2):
     coeff = pywt.wavedec(x, wavelet, mode="per")
-    num_ = 1.0
-    den_ = 0.6745*3
+    num_ = 1.0   # raising this increases spikes
+    den_ = 0.6745*4
     sigma = (num_/den_) * madev(coeff[-level])
     uthresh = sigma * np.sqrt(2 * np.log(len(x)))
     coeff[1:] = (pywt.threshold(i, value=uthresh, mode='hard') for i in coeff[1:])
@@ -2211,9 +2311,9 @@ def bestWvltForRegion(spectra_array, bestWvlt, smoothed_array=True, plot_fig=Tru
         print("Least similarity found: {} in spectra #{}".format(min(smList), smList.index(min(smList))))
 
     if plot_fig:
-        nS = np.random.randint(spectra_array.shape[0])
+        nS = 1520 # np.random.randint(spectra_array.shape[0])
         signal = copy.deepcopy(spectra_array[nS, :])
-        filtered = wavelet_denoising(signal, wavelet=bestWvlt)
+        filtered = wavelet_denoising(signal, wavelet=bestWvlt)  #[0:-1]
         assert (signal.shape == filtered.shape)
         # filtered_ = copy.deepcopy(filtered)
         # filtered_[filtered > 0] = 0  # for baseline correction to 0
@@ -2226,7 +2326,7 @@ def bestWvltForRegion(spectra_array, bestWvlt, smoothed_array=True, plot_fig=Tru
         ax.grid()
         ax.plot(filtered, color=(0, 0, 0.9), linewidth=1.5, label='{} filtered'.format(bestWvlt), alpha=0.5)
         ax.legend(loc='upper right')
-        fig.suptitle('wavelet smoothing', fontsize=12, y=1, fontweight='bold')
+        fig.suptitle('wavelet smoothing spec: #{}'.format(nS), fontsize=12, y=1, fontweight='bold')
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig.tight_layout(pad=0.2)
         plt.show()
@@ -2235,13 +2335,16 @@ def bestWvltForRegion(spectra_array, bestWvlt, smoothed_array=True, plot_fig=Tru
         smoothed_array_ = np.zeros_like(spectra_array)
         for nS in range(spectra_array.shape[0]):
             signal = copy.deepcopy(spectra_array[nS, :])
-            filtered = wavelet_denoising(signal, wavelet=wvList[nS])
+            filtered = wavelet_denoising(signal, wavelet=bestWvlt)  #[0:-1] #wvList[nS]) #TODO: odd/even size
+            print(">> ", spectra_array.shape)
+            print(">> ", signal.shape, filtered.shape)
+            break
             assert (signal.shape == filtered.shape)
             filtered = zeroBaseSpec(filtered)
             smoothed_array_[nS, :] = filtered
-        return bestWvlt, smoothed_array_, smList
+        return bestWvlt, smoothed_array_
     else:
-        return bestWvlt
+        return bestWvlt, smList
 
 def downSpatMS(msArray, i_, wSize):
     """
@@ -2418,22 +2521,23 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
         plt.show()
     return specDict
 
-def rawVSprocessed(rawMSpath, proMSpath):
-    rawMS = IMZMLExtract(rawMSpath)
-    proMS = IMZMLExtract(proMSpath)
+# def rawVSprocessed(rawMSpath, proMSpath):
+def rawVSprocessed(mzraw, abraw, mzpro, abpro):
+    # rawMS = IMZMLExtract(rawMSpath)
+    # proMS = IMZMLExtract(proMSpath)
 
-    n_spec = np.random.randint(len(rawMS.parser.intensityLengths))
-    mzraw = rawMS.parser.getspectrum(n_spec)[0]
-    abraw = rawMS.parser.getspectrum(n_spec)[1]
-
-    mzpro = proMS.parser.getspectrum(n_spec)[0]
-    abpro = proMS.parser.getspectrum(n_spec)[1]
+    n_spec = 00 #np.random.randint(len(rawMS.parser.intensityLengths))
+    # mzraw = rawMS.parser.getspectrum(n_spec)[0]
+    # abraw = rawMS.parser.getspectrum(n_spec)[1]
+    #
+    # mzpro = proMS.parser.getspectrum(n_spec)[0]
+    # abpro = proMS.parser.getspectrum(n_spec)[1]
 
     fig, ax = plt.subplots(2, 1, dpi=100)
 
     ax[0].hist(mzraw, color=(0.9, 0, 0), linewidth=1.5, label='raw', bins=200)  # , alpha=0.9)
     ax[0].set_xlabel("m/z", fontsize=12)
-    ax[0].set_ylabel("intensity", fontsize=12, color=(0.9, 0, 0))
+    ax[0].set_ylabel("counts", fontsize=12, color=(0.9, 0, 0))
     ax[0].legend(loc='upper center')
     ax[0].grid()
 

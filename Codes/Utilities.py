@@ -114,7 +114,10 @@ class ImzmlAll(object):
         regionPixels = regionCoords[regID]  # [(704, 180, 1), (705, 178, 1), ...
         return regionPixels
 
-    def get_region_range(self, regID):
+    def get_region_range(self, regID, whole=False):
+        """
+        whole: consider all regions or not
+        """
         regionPixels = self.get_region_pixels(regID)
         minx = min([x[0] for x in regionPixels])
         maxx = max([x[0] for x in regionPixels])
@@ -126,22 +129,29 @@ class ImzmlAll(object):
         gcoord2index = self._global2index()
         spectralength = 0
         mzidx = 0
-        for coord in regionPixels:
-            if self.parser.mzLengths[gcoord2index[coord]] > spectralength:
-                mzidx = gcoord2index[coord]
-                spectralength = self.parser.mzLengths[gcoord2index[coord]]
-            # spectralength = max(spectralength,
-            #                       self.parser.mzLengths[gcoord2index[coord]])
-        return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
+        if not whole:
+            for coord in regionPixels:
+                if self.parser.mzLengths[gcoord2index[coord]] > spectralength:
+                    mzidx = gcoord2index[coord]
+                    spectralength = self.parser.mzLengths[gcoord2index[coord]]
+                # spectralength = max(spectralength,
+                #                       self.parser.mzLengths[gcoord2index[coord]])
+            return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
+        else:
+            for sidx, coor in enumerate(self.parser.coordinates):
+                # print(sidx, coor)
+                if self.parser.mzLengths[sidx] > spectralength:
+                    mzidx = sidx
+                    spectralength = self.parser.mzLengths[mzidx]
+            # print(mzidx, slef.parser.mzLengths[mzidx])
+            return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
 
     def get_region(self, regID):
-        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID)
-
+        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID, whole=True)
         regionshape = [maxx-minx+1,
                        maxy-miny+1]
         if maxz-minz+1 > 1:
             regionshape.append(maxz-minz+1)
-
         regionshape.append(spectralength)
         regionPixels = self.get_region_pixels(regID)
         gcoord2index = self._global2index()
@@ -149,7 +159,7 @@ class ImzmlAll(object):
         array2D = np.zeros([len(regionPixels), spectralength], dtype=np.float32)
         longestmz = self.parser.getspectrum(mzidx)[0]
         # regCoor = np.zeros([len(regionPixels), 2])
-        lCoorIdx = []#defaultdict(list)
+        lCoorIdx = []   #defaultdict(list)
         for idx, coord in enumerate(regionPixels):
             xpos = coord[0] - minx
             ypos = coord[1] - miny
@@ -1756,7 +1766,7 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     plot_spec = True
     plot_pca = True
     plot_umap = True
-    save_rseg = False
+    save_rseg = True
     RandomState = 20210131
     # +------------------------------------+
     # |     read data and save region      |
@@ -1777,8 +1787,9 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     else:
         ImzObj = ImzmlAll(mspath)
         spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID)
+        print("spec3D >> ", spec3D.shape)
         spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
-        spectra, peakmzs = ImzObj.preprocessing(spectra_smoothed, refmz)
+        spectra, peakmzs = ImzObj.peak_pick(spectra_smoothed, refmz)
         with h5py.File(regname, 'w') as pfile:
             pfile['spectra'] = spectra
             pfile['coordinates'] = localCoor
@@ -1798,11 +1809,11 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     # +----------------+
     if plot_spec:
         nS = np.random.randint(nSpecs)
-        fig, ax = plt.subplots(5, 1, figsize=(16, 10), dpi=200)
+        fig, ax = plt.subplots(4, 1, figsize=(16, 10), dpi=200)
         ax[0].plot(spectra[nS, :])
         ax[0].set_title("raw spectrum")
         ax[1].plot(reg_norm[nS, :])
-        ax[1].set_title("'tic' norm")
+        ax[1].set_title("max norm")
         ax[2].plot(reg_norm_ss[nS, :])
         ax[2].set_title("standardized")
         ax[3].plot(np.mean(spectra, axis=0))
@@ -1936,28 +1947,38 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     HC_labels = sch.fcluster(Y, thre_dist, criterion='distance')
     # prepare label data
     elements, counts = np.unique(HC_labels, return_counts=True)
-    print(elements, counts)
+    # print(elements, counts)
 
-    if __name__ != '__main__':
-        loadings = pca.components_.T
+    if __name__ != '__main__':  #TODO: Fix PCA loadings and ion imaging
+        # loadings = pca.components_.T
+        loadings = pd.DataFrame(pca.components_.T, columns=['PC{}'.format(x+1) for x in range(nBins)])
+        print("loadings: ", loadings) #['PC897'])
+        SL = loadings**2
+        print("SL \n", SL)
+        SSL = np.sum(SL, axis=1)
+        print(SSL)
+
+        print(loadings.shape)
         SSL = np.sum(loadings ** 2, axis=1)
+        print(SSL.shape)
         mean_imgs = []
         total_SSLs = []
-        # img_std =
-        for label in elements:
-            idx = np.where(HC_labels == label)[0]
+            # # img_std =
+            # for label in elements:
+            #     idx = np.where(HC_labels == label)[0]
+            #
+            #     # total SSL
+            #     total_SSL = np.sum(SSL[idx])
+            #     print(total_SSL)
+            #     # imgs in the cluster
+            #     current_cluster = imgs_std[idx]
+            #     # average img
+            #     mean_img = np.mean(imgs_std[idx], axis=0)
+            #
+            #     # accumulate data
+            #     total_SSLs.append(total_SSL)
+            #     mean_imgs.append(mean_img)
 
-            # total SSL
-            total_SSL = np.sum(SSL[idx])
-            print(total_SSL)
-            # imgs in the cluster
-            # current_cluster = imgs_std[idx]
-            # average img
-            # mean_img = np.mean(imgs_std[idx], axis=0)
-
-            # accumulate data
-            total_SSLs.append(total_SSL)
-            # mean_imgs.append(mean_img)
     # +------------------+
     # |      UMAP        |
     # +------------------+

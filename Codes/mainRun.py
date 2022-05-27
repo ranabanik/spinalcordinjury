@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Utilities import msmlfunc4, downSpatMS, matchSpecLabel2, ImzmlAll, bestWvltForRegion
+from Utilities import msmlfunc4, matchSpecLabel2, ImzmlAll, bestWvltForRegion
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -23,12 +23,200 @@ import h5py
 posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
-regID = 1
-# ImzObj = ImzmlAll(mspath)
-# spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID)
+regID = 3
+
+if __name__ != '__main__':
+    msmlfunc4(mspath, regID=regID, threshold=0.95, exprun='for_ANOVA')
+
+ImzObj = ImzmlAll(mspath)
+# print(len(ImzObj.parser.mzLengths), len(ImzObj.parser.coordinates))
+# spectralength = 0
+# mzidx = 0
+# for sidx, coor in enumerate(ImzObj.parser.coordinates):
+#     # print(sidx, coor)
+#     if ImzObj.parser.mzLengths[sidx] > spectralength:
+#         mzidx = sidx
+#         spectralength = ImzObj.parser.mzLengths[mzidx]
+# print(mzidx, ImzObj.parser.mzLengths[mzidx])
+#
+# spectra2D = [] #np.zeros()
+# for sidx, coor in enumerate(ImzObj.parser.coordinates):
+#     spectra = ImzObj.parser.getspectrum(sidx)
+#     # print(np.array(spectra).shape)
+#     interp_spectra = ImzObj._interpolate_spectrum(spectra[1], spectra[0], ImzObj.parser.getspectrum(mzidx)[0])
+#     spectra2D.append(interp_spectra)
+#     # break
+# print(np.array(spectra2D, dtype=np.float32).shape)
+#
+# from Utilities import rawVSprocessed
+#
+# rawVSprocessed(ImzObj.parser.getspectrum(546)[0], ImzObj.parser.getspectrum(546)[1],
+#                ImzObj.parser.getspectrum(mzidx)[0], spectra2D[546])
+#
+# (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = ImzObj.get_region_range(2)
+# regionshape = [maxx - minx + 1,
+#                maxy - miny + 1]
+# regionshape.append(ImzObj.parser.mzLengths[mzidx])
+# array3D_2 = np.zeros(regionshape, dtype=np.float32)
+
+# print(ImzObj.get_region_range(2, whole=True))
+# print(ImzObj.get_region_range(2, whole=False))
+
+if __name__ != '__main__':
+    regID = 2
+    spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
+    regID = 3
+    spec3D3, spectra3, refmz3, regionshape3, localCoor3 = ImzObj.get_region(regID)
+
+    print(spec3D2.shape)
+    print("2d array 2 >>", spectra2.shape)
+    print(spec3D3.shape)
+    print("2d array 3 >>", spectra3.shape)
+# +--------------------+
+# |        ANOVA       |
+# +--------------------+
+if __name__ == '__main__':
+    ImzObj = ImzmlAll(mspath)
+    regID = 2
+    spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
+    regID = 3
+    spec3D3, spectra3, refmz3, regionshape3, localCoor3 = ImzObj.get_region(regID)
+    seg2 = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_2', '*4_1.npy'))[0]
+    seg3 = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_3', '*4_1.npy'))[0]
+    label2 = np.load(seg2)
+    label3 = np.load(seg3)
+    # print(np.unique(label2))
+    # print(np.unique(label3))
+    elements, counts = np.unique(label2, return_counts=True)
+    print("label2 >>", elements, counts)
+    elements, counts = np.unique(label3, return_counts=True)
+    print("label3 >>", elements, counts)
+    print("3d reg 2", spec3D2.shape)
+    print("2d reg 2 >>", spectra2.shape)
+    print("3d reg 3", spec3D3.shape)
+    print("2d reg 3 >>", spectra3.shape)
+
+    plt.subplot(121)
+    plt.imshow(label2 == 2)
+    plt.title("reg2")
+    # plt.colorbar(label)
+    # plt.show()
+    plt.subplot(122)
+    plt.imshow(label3 == 3)
+    plt.title("reg3")
+    plt.show()
+
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    arrays = [label2, label3]
+    title = ['reg2', 'reg3']
+    fig, axs = plt.subplots(1, 2, figsize=(10, 8), dpi=200, sharex=False)
+    for ar, tl, ax in zip(arrays, title, axs.ravel()):
+        im = ax.imshow(ar)  # , cmap='twilight') #cm)
+        ax.set_title(tl, fontsize=20)
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        fig.colorbar(im, cax=cax, ax=ax)
+    plt.show()
+
+    # from PIL import Image
+    #
+    # img = Image.fromarray(label2, mode="P")
+    # img.putpalette([
+    #     255, 255, 255,  # index 0
+    #     255, 0, 0,  # index 1
+    #     0, 255, 0,  # index 2
+    #     0, 0, 255,  # index 3
+    #     255, 255, 0])
+    # img.show()
+
+    # print(len(np.where(label1 == 1)[0]))
+    spec_lab_2 = [] #np.zeros([len(np.where(label1 == 4)[0]), spectra.shape[1]], dtype=np.float32)
+    spec_lab_3 = [] #np.zeros([len(np.where(label1 == 3)[0]), spectra.shape[1]], dtype=np.float32)
+    # print(type(localCoor), "\n", localCoor)
+    img = np.zeros([regionshape2[0], regionshape2[1]], dtype=np.float32)
+    for idx, (i, j) in enumerate(zip(np.where(label2 == 2)[0], np.where(label2 == 2)[1])):
+        # print(idx, i, j, np.where(localCoor[:] == (i, j)))
+        for ldx, item in enumerate(localCoor2):
+            if item == (i, j):
+                # print(idx, i, j, ldx)
+                img[i, j] = 2
+                spec_lab_2.append(spectra2[ldx, :])  #[idx, :] = spectra[ldx, :]
+                # break
+    plt.imshow(img)
+    plt.show()
+
+    img = np.zeros([regionshape3[0], regionshape3[1]], dtype=np.float32)
+    for idx, (i, j) in enumerate(zip(np.where(label3 == 3)[0], np.where(label3 == 3)[1])):
+        # print(idx, i, j, np.where(localCoor[:] == (i, j)))
+        for ldx, item in enumerate(localCoor3):
+            if item == (i, j):
+                # print(idx, i, j, ldx)
+                img[i, j] = 2
+                spec_lab_3.append(spectra3[ldx, :])
+                # spec_lab_4[idx, :] = spectra[ldx, :]
+                # break
+    plt.imshow(img)
+    plt.show()
+    spec_lab_2 = np.array(spec_lab_2)
+    spec_lab_3 = np.array(spec_lab_3)
+    print(spec_lab_2.shape, spec_lab_3.shape)
+    from scipy.stats import stats
+    # fvalue, pvalue = stats.f_oneway(np.mean(spec_lab_2, axis=0), np.mean(spec_lab_3, axis=0), axis=0)
+    # fvalue, pvalue = stats.f_oneway(spec_lab_3[0:1000, :], spec_lab_3[1000:, :]) #, axis=0)
+    fvalue, pvalue = stats.f_oneway(spec_lab_2, spec_lab_3)  # , axis=0)
+    # print(spec_lab_3)#.shape, spec_lab_4.shape)
+    print(fvalue)
+    # print(len(fvalue), "\n")
+    print(pvalue)
+    # print(len(pvalue))
+    plt.plot(fvalue)
+    plt.title("F value")
+    plt.show()
+    plt.plot(pvalue)
+    plt.title("p-value")
+    plt.show()
+
+    pvalue_log = -np.log10(pvalue)
+    plt.plot(pvalue_log)
+    plt.title("-log10(p-value)")
+    plt.show()
+
+        # print()
+    # for l in range(1, len(np.unique(label1))):  # to avoid 0-background
+    #     label1_ = copy.deepcopy(label1)
+    #     label1_[label1 != l] = 0
+    #     spec = np.mean(arr1[np.where(label1_)], axis=0)
+    #     spec = {"{}_{}".format(1, l): spec}
+    #     specDict.update(spec)
+    #
+    # for l in range(1, len(np.unique(label2))):  # to avoid 0-background
+    #     label2_ = copy.deepcopy(label2)
+    #     label2_[label2 != l] = 0
+    #     spec = np.mean(arr2[np.where(label2_)], axis=0)
+    #     spec = {"{}_{}".format(2, l): spec}
+    #     specDict.update(spec)
+
+# dirname = os.path.dirname(mspath)
+# regDir = os.path.join(dirname, 'reg_{}'.format(regID))
+
+
 # smooth_spectra = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
-# peak_spectra1, peakmzs = ImzObj.peak_pick(spectra, refmz)
+# # peak_spectra1, peakmzs = ImzObj.peak_pick(spectra, refmz)
 # peak_spectra2, peakmzs = ImzObj.peak_pick(smooth_spectra, refmz)
+# print(len(localCoor), regionshape)
+# for idx, mz in enumerate(peakmzs):
+#     i_img = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+#     for jdx, coor in enumerate(localCoor):
+#         i_img[coor[0], coor[1]] = peak_spectra2[jdx, idx]
+#     fname = os.path.join(regDir, 'ion_img_{}.png'.format(mz))
+#     cv2.imwrite(fname, i_img)
+#     break
+
+    # plt.imshow(i_img)
+    # plt.show()
+    # break
+
 # from Utilities import normalize_spectrum
 # spec_norm = np.zeros_like(peak_spectra2)
 # for s in range(peak_spectra2.shape[0]):
@@ -59,7 +247,7 @@ regID = 1
 # rawVSprocessed(refmz, abraw, peakmzs, abpro)
 # print(reg_smooth_.shape)
 
-msmlfunc4(mspath, regID=regID, threshold=0.95, exprun='peak_picked')
+
 
 # msmlfunc3(mspath, regID=1, threshold=0.95, exprun='HC_ion_img', downsamp_i=None, wSize=None)
 

@@ -88,7 +88,7 @@ class ImzmlAll(object):
             global2index[coord] = sidx
         return global2index
 
-    def get_regions(self):
+    def _get_regions(self):
         maxX = 0
         maxY = 0
         for idx, coord in enumerate(self.parser.coordinates):
@@ -103,33 +103,38 @@ class ImzmlAll(object):
         # print("There are {} regions.".format(num_features))
         return labeled_array, num_features
 
-    def get_region_pixels(self, regID):
+    def get_region_pixels(self, regID=None):
         regionCoords = defaultdict(list)
-        labeled_array, num_features = self.get_regions()
+        labeled_array, num_features = self._get_regions()
+        # plt.imshow(labeled_array)
+        # plt.show()
         for x in range(0, labeled_array.shape[0]):
             for y in range(0, labeled_array.shape[1]):
                 if labeled_array[x, y] == 0:
                     continue
                 regionCoords[labeled_array[x, y]].append((x, y, 1))
-        regionPixels = regionCoords[regID]  # [(704, 180, 1), (705, 178, 1), ...
-        return regionPixels
 
-    def get_region_range(self, regID, whole=False):
-        """
-        whole: consider all regions or not
-        """
-        regionPixels = self.get_region_pixels(regID)
-        minx = min([x[0] for x in regionPixels])
-        maxx = max([x[0] for x in regionPixels])
-        miny = min([x[1] for x in regionPixels])
-        maxy = max([x[1] for x in regionPixels])
-        minz = min([x[2] for x in regionPixels])
-        maxz = max([x[2] for x in regionPixels])
+        if regID is not None:
+            regionPixels = regionCoords[regID]  # [(704, 180, 1), (705, 178, 1), ...
+            return regionPixels
+        else:
+            return regionCoords
 
+    def get_region_range(self, regID=None):
+        """
+        regID: if None takes all regions
+        """
         gcoord2index = self._global2index()
         spectralength = 0
         mzidx = 0
-        if not whole:
+        if regID is not None:
+            regionPixels = self.get_region_pixels(regID)
+            minx = min([x[0] for x in regionPixels])
+            maxx = max([x[0] for x in regionPixels])
+            miny = min([x[1] for x in regionPixels])
+            maxy = max([x[1] for x in regionPixels])
+            minz = min([x[2] for x in regionPixels])
+            maxz = max([x[2] for x in regionPixels])
             for coord in regionPixels:
                 if self.parser.mzLengths[gcoord2index[coord]] > spectralength:
                     mzidx = gcoord2index[coord]
@@ -137,17 +142,30 @@ class ImzmlAll(object):
                 # spectralength = max(spectralength,
                 #                       self.parser.mzLengths[gcoord2index[coord]])
             return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
-        else:
+        else: # considers mz of all regions
+            regionCoords = self.get_region_pixels()
+            minx = np.inf
+            maxx = -np.inf
+            miny = np.inf
+            maxy = -np.inf
+            minz = np.inf
+            maxz = -np.inf
+            for i in range(len(regionCoords)):
+                minx = min(minx, min([x[0] for x in regionCoords[i + 1]]))
+                miny = min(miny, min([x[1] for x in regionCoords[i + 1]]))
+                minz = min(minz, min([x[2] for x in regionCoords[i + 1]]))
+                maxx = max(maxx, max([x[0] for x in regionCoords[i + 1]]))
+                maxy = max(maxy, max([x[1] for x in regionCoords[i + 1]]))
+                maxz = max(maxz, max([x[2] for x in regionCoords[i + 1]]))
             for sidx, coor in enumerate(self.parser.coordinates):
                 # print(sidx, coor)
                 if self.parser.mzLengths[sidx] > spectralength:
                     mzidx = sidx
                     spectralength = self.parser.mzLengths[mzidx]
-            # print(mzidx, slef.parser.mzLengths[mzidx])
             return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
 
     def get_region(self, regID):
-        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID, whole=True)
+        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID)
         regionshape = [maxx-minx+1,
                        maxy-miny+1]
         if maxz-minz+1 > 1:
@@ -188,17 +206,20 @@ class ImzmlAll(object):
                 spectra_[s, :] = smoothspec
         return spectra_
 
-    def peak_pick(self, spectra, refmz):
+    def peak_pick(self, spectra, refmz, meanSpec=None):
         """
+        spectra: 2D array of spectra -> nSpec x nMZ
+        meanSpec: mean abundance/intensity of all regions
         by peak_picking ...
         """
         picking_method = "quadratic"
-        snr = 30     # standard: higher value increases number of peaks
-        intensity_threshold = 5     # depends on instrument/ 0 -> more permissive
-        fwhm_expansion = 2    # shouldn't be more than 2; 1.2 - 1.4 is optimum
-        meanSpec = np.mean(spectra, axis=0)
-        # plt.plot(refmz, meanSpec)
-        # plt.show()
+        snr = 3    # standard: higher value increases number of peaks
+        intensity_threshold = 5    #5 # depends on instrument/ 0 -> more permissive
+        fwhm_expansion = 1.0    # shouldn't be more than 2; 1.2 - 1.4 is optimum
+        if meanSpec is None: #spectra.ndim == 2:
+            meanSpec = np.mean(spectra, axis=0)
+        # else:   # if mean of all regions given...
+        #     meanSpec = spectra
         peak_list = pick_peaks(refmz,
                                meanSpec,
                                fit_type=picking_method,
@@ -224,6 +245,18 @@ class ImzmlAll(object):
             spectra_.append(peaks)
         spectra = np.array(spectra_, dtype=np.float32)
         return spectra, peak_mzs
+
+    def get_mean_abundance(self):
+        """
+        for all regions
+        """
+        labeled_array, num_features = self._get_regions()
+        meanintensity = []
+        for r in range(num_features):
+            array3D, array2D, longestmz, regionshape, lCoorIdx = self.get_region(r+1)
+            meanintensity.append(np.mean(array2D, axis=0))
+        return np.mean(np.array(meanintensity, dtype=np.float32), axis=0)
+
 
 class MaldiTofSpectrum(np.ndarray):
     """Numpy NDArray subclass representing a MALDI-TOF Spectrum."""
@@ -1788,7 +1821,7 @@ def msmlfunc4(mspath, regID, threshold, exprun):
         ImzObj = ImzmlAll(mspath)
         spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID)
         print("spec3D >> ", spec3D.shape)
-        spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
+        spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2) #TODO: smooth before peak for all regions. How?
         spectra, peakmzs = ImzObj.peak_pick(spectra_smoothed, refmz)
         with h5py.File(regname, 'w') as pfile:
             pfile['spectra'] = spectra
@@ -2480,10 +2513,11 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
     """
     seg1 & seg2: segmentation file path(.npy)
     Comparison of segmentation between two region arrays (3D)
-
-    e.g.: matchSpecLabel2(True, seg1_path, seg2_path, seg3_path, arr1=spec_array1,
-                                                                arr2=spec_array2,
-                                                               arr3=spec_array3)
+    exprun: string command, name the experiment run
+    e.g.: matchSpecLabel2(True, seg1_path, seg2_path, seg3_path, seg4_path, arr1=spec_array1,
+                                                                        arr2=spec_array2,
+                                                                      arr3=spec_array3,
+                                                                    arr4=spec_array4)
     """
     specDict = {}
     segList = []

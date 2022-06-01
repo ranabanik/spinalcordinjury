@@ -10,7 +10,7 @@ import pickle
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import matplotlib as mtl
-# mtl.use('TkAgg')    # required for widget slider...
+mtl.use('TkAgg')    # required for widget slider...
 from scipy.io import loadmat, savemat
 import time
 from imzml import IMZMLExtract, normalize_spectrum
@@ -23,12 +23,23 @@ import h5py
 posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
-regID = 3
+regID = 2
+ImzObj = ImzmlAll(mspath)
+# meanSpec = ImzObj.get_mean_abundance()
+spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
+print(spectra2.shape)
+spectra, peak_mz = ImzObj.peak_pick(spectra2, refmz2)   #, meanSpec)
+
+print(spectra.shape)
+
+from Utilities import rawVSprocessed
+#
+rawVSprocessed(refmz2, spectra2[1000], peak_mz, spectra[1000])
+
 
 if __name__ != '__main__':
     msmlfunc4(mspath, regID=regID, threshold=0.95, exprun='for_ANOVA')
 
-ImzObj = ImzmlAll(mspath)
 # print(len(ImzObj.parser.mzLengths), len(ImzObj.parser.coordinates))
 # spectralength = 0
 # mzidx = 0
@@ -75,7 +86,7 @@ if __name__ != '__main__':
 # +--------------------+
 # |        ANOVA       |
 # +--------------------+
-if __name__ == '__main__':
+if __name__ != '__main__':
     ImzObj = ImzmlAll(mspath)
     regID = 2
     spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
@@ -182,7 +193,20 @@ if __name__ == '__main__':
     plt.title("-log10(p-value)")
     plt.show()
 
-        # print()
+if __name__ != '__main__':
+    seg1_path = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_1', '*4_1.npy'))[0]
+    seg2_path = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_2', '*4_1.npy'))[0]
+    seg3_path = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_3', '*4_1.npy'))[0]
+    ImzObj = ImzmlAll(mspath)
+    regID = 1
+    spec3D1, spectra1, refmz1, regionshape1, localCoor1 = ImzObj.get_region(regID)
+    regID = 2
+    spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
+    regID = 3
+    spec3D3, spectra3, refmz3, regionshape3, localCoor3 = ImzObj.get_region(regID)
+    matchSpecLabel2(True, seg1_path, seg2_path, seg3_path, arr1=spec3D1, arr2=spec3D2, arr3=spec3D3, exprun='kinda whole')
+
+    # print()
     # for l in range(1, len(np.unique(label1))):  # to avoid 0-background
     #     label1_ = copy.deepcopy(label1)
     #     label1_[label1 != l] = 0
@@ -554,7 +578,7 @@ if __name__ != '__main__':
 # seg3_down = glob(os.path.join(reg3_down, '*6_3_1.npy'))[0]
 
 # from Utilities import matchSpecLabel2
-# matchSpecLabel2(True, seg1_path, seg2_path, seg3_path, seg4_path, arr1=spec_array1, arr2=spec_array2, arr3=spec_array3, arr4=spec_array4) #, arr5=spec_array5)
+# matchSpecLabel2(True, seg1_path, seg2_path, arr1=spec_array1, arr2=spec_array2) #, arr5=spec_array5)
 
 # +-------------------------+
 # | check downsample 3x3    |

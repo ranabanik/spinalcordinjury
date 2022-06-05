@@ -16,7 +16,7 @@ import scipy.cluster.hierarchy as sch
 import pywt
 import mglearn
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler as SS
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
 from sklearn.cluster import AgglomerativeClustering
@@ -120,21 +120,28 @@ class ImzmlAll(object):
         else:
             return regionCoords
 
-    def get_region_range(self, regID=None):
+    def get_region_range(self, regID, whole=False):
         """
         regID: if None takes all regions
         """
         gcoord2index = self._global2index()
         spectralength = 0
         mzidx = 0
-        if regID is not None:
-            regionPixels = self.get_region_pixels(regID)
-            minx = min([x[0] for x in regionPixels])
-            maxx = max([x[0] for x in regionPixels])
-            miny = min([x[1] for x in regionPixels])
-            maxy = max([x[1] for x in regionPixels])
-            minz = min([x[2] for x in regionPixels])
-            maxz = max([x[2] for x in regionPixels])
+        regionPixels = self.get_region_pixels(regID)
+        minx = min([x[0] for x in regionPixels])
+        maxx = max([x[0] for x in regionPixels])
+        miny = min([x[1] for x in regionPixels])
+        maxy = max([x[1] for x in regionPixels])
+        minz = min([x[2] for x in regionPixels])
+        maxz = max([x[2] for x in regionPixels])
+        if not whole: #regID is not None:
+            # regionPixels = self.get_region_pixels(regID)
+            # minx = min([x[0] for x in regionPixels])
+            # maxx = max([x[0] for x in regionPixels])
+            # miny = min([x[1] for x in regionPixels])
+            # maxy = max([x[1] for x in regionPixels])
+            # minz = min([x[2] for x in regionPixels])
+            # maxz = max([x[2] for x in regionPixels])
             for coord in regionPixels:
                 if self.parser.mzLengths[gcoord2index[coord]] > spectralength:
                     mzidx = gcoord2index[coord]
@@ -143,20 +150,20 @@ class ImzmlAll(object):
                 #                       self.parser.mzLengths[gcoord2index[coord]])
             return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
         else: # considers mz of all regions
-            regionCoords = self.get_region_pixels()
-            minx = np.inf
-            maxx = -np.inf
-            miny = np.inf
-            maxy = -np.inf
-            minz = np.inf
-            maxz = -np.inf
-            for i in range(len(regionCoords)):
-                minx = min(minx, min([x[0] for x in regionCoords[i + 1]]))
-                miny = min(miny, min([x[1] for x in regionCoords[i + 1]]))
-                minz = min(minz, min([x[2] for x in regionCoords[i + 1]]))
-                maxx = max(maxx, max([x[0] for x in regionCoords[i + 1]]))
-                maxy = max(maxy, max([x[1] for x in regionCoords[i + 1]]))
-                maxz = max(maxz, max([x[2] for x in regionCoords[i + 1]]))
+            # regionCoords = self.get_region_pixels()
+            # minx = np.inf
+            # maxx = -np.inf
+            # miny = np.inf
+            # maxy = -np.inf
+            # minz = np.inf
+            # maxz = -np.inf
+            # for i in range(len(regionCoords)):
+            #     minx = min(minx, min([x[0] for x in regionCoords[i + 1]]))
+            #     miny = min(miny, min([x[1] for x in regionCoords[i + 1]]))
+            #     minz = min(minz, min([x[2] for x in regionCoords[i + 1]]))
+            #     maxx = max(maxx, max([x[0] for x in regionCoords[i + 1]]))
+            #     maxy = max(maxy, max([x[1] for x in regionCoords[i + 1]]))
+            #     maxz = max(maxz, max([x[2] for x in regionCoords[i + 1]]))
             for sidx, coor in enumerate(self.parser.coordinates):
                 # print(sidx, coor)
                 if self.parser.mzLengths[sidx] > spectralength:
@@ -164,26 +171,33 @@ class ImzmlAll(object):
                     spectralength = self.parser.mzLengths[mzidx]
             return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
 
-    def get_region(self, regID):
-        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID)
+    def get_region(self, regID, whole=False):
+        # if whole:
+        #     (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range()
+        # else:
+        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID, whole)
         regionshape = [maxx-minx+1,
                        maxy-miny+1]
         if maxz-minz+1 > 1:
             regionshape.append(maxz-minz+1)
         regionshape.append(spectralength)
-        regionPixels = self.get_region_pixels(regID)
         gcoord2index = self._global2index()
         array3D = np.zeros(regionshape, dtype=np.float32)
+        regionPixels = self.get_region_pixels(regID)
         array2D = np.zeros([len(regionPixels), spectralength], dtype=np.float32)
         longestmz = self.parser.getspectrum(mzidx)[0]
         # regCoor = np.zeros([len(regionPixels), 2])
         lCoorIdx = []   #defaultdict(list)
+        nS = np.random.randint(len(regionPixels))
         for idx, coord in enumerate(regionPixels):
             xpos = coord[0] - minx
             ypos = coord[1] - miny
             # regCoor[idx, 0], regCoor[idx, 1] = xpos, ypos
             spectra = self.parser.getspectrum(gcoord2index[coord])
             interp_spectra = self._interpolate_spectrum(spectra[1], spectra[0], longestmz, method='Pchip')
+            if idx == nS:
+                print("Plotting interpolation: #{}".format(nS))
+                rawVSprocessed(spectra[0], spectra[1], longestmz, interp_spectra, n_spec=nS, exprun='Interpolation')
             array3D[xpos, ypos, :] = interp_spectra
             array2D[idx, :] = interp_spectra
             # lCoorIdx[idx].append(gcoord2index[coord]) # {0: [1182], 1: [1266], 2: [1350], 3: [1434]
@@ -213,9 +227,9 @@ class ImzmlAll(object):
         by peak_picking ...
         """
         picking_method = "quadratic"
-        snr = 3    # standard: higher value increases number of peaks
+        snr = 3    # standard: lower value increases number of peaks
         intensity_threshold = 5    #5 # depends on instrument/ 0 -> more permissive
-        fwhm_expansion = 1.0    # shouldn't be more than 2; 1.2 - 1.4 is optimum
+        fwhm_expansion = 1.4    # shouldn't be more than 2; 1.2 - 1.4 is optimum
         if meanSpec is None: #spectra.ndim == 2:
             meanSpec = np.mean(spectra, axis=0)
         # else:   # if mean of all regions given...
@@ -1810,7 +1824,7 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     regDir = os.path.join(dirname, 'reg_{}'.format(regID))
     if not os.path.isdir(regDir):
         os.mkdir(regDir)
-    regname = os.path.join(regDir, '{}_reg_{}.h5'.format(filename, regID))
+    regname = os.path.join(regDir, '{}_reg_{}_{}.h5'.format(filename, regID, exprun))
     if os.path.isfile(regname):
         f = h5py.File(regname, 'r')
         spectra = f['spectra']
@@ -1819,9 +1833,8 @@ def msmlfunc4(mspath, regID, threshold, exprun):
         peakmzs = f['peakmzs']
     else:
         ImzObj = ImzmlAll(mspath)
-        spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID)
-        print("spec3D >> ", spec3D.shape)
-        spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2) #TODO: smooth before peak for all regions. How?
+        spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID, whole=False)
+        spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
         spectra, peakmzs = ImzObj.peak_pick(spectra_smoothed, refmz)
         with h5py.File(regname, 'w') as pfile:
             pfile['spectra'] = spectra
@@ -1837,6 +1850,7 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     for s in range(nSpecs):
         reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='max_intensity_region')     #reg_smooth_
     reg_norm_ss = makeSS(reg_norm).astype(np.float64)
+    # reg_norm_ss = SS(with_mean=True, with_std=True).fit_transform(reg_norm)
     # +----------------+
     # |  plot spectra  |
     # +----------------+
@@ -1950,37 +1964,45 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     # +-------------------+
     HC_method = 'ward'
     HC_metric = 'euclidean'
+    fig = plt.figure(figsize=(15, 15), dpi=300)
+    # plot dendogram
+    axdendro = fig.add_axes([0.09, 0.1, 0.2, 0.8])
     Y = sch.linkage(df_pca.values, method=HC_method, metric=HC_metric)
-    Z = sch.dendrogram(Y, no_plot=True)
-    HC_idx = Z['leaves']
-    HC_idx = np.array(HC_idx)
-
-    # plot it
     thre_dist = 375  # TODO: how to fix it?
-    plt.figure(figsize=(15, 10))
-    Z = sch.dendrogram(Y, color_threshold=thre_dist)
-    plt.title('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
-        HC_method, HC_metric, thre_dist))
-
-    ## 2. sort features with clustering results
+    Z = sch.dendrogram(Y, color_threshold=thre_dist, orientation='left')
+    fig.gca().invert_yaxis()
+    axdendro.set_xticks([])
+    axdendro.set_yticks([])
+    # plot matrix/feature(sorted)
+    axmatrix = fig.add_axes([0.3, 0.1, 0.6, 0.8]) #left, bottom, width, height
+    HC_idx = np.array(Z['leaves'])
     features_modi_sorted = df_pca.values[HC_idx]
-
-    # plot it
-    fig = plt.figure(figsize=(10, 10))
-    axmatrix = fig.add_axes([0.10, 0, 0.80, 0.80])
     im = axmatrix.matshow(features_modi_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
     fig.gca().invert_yaxis()
+    axmatrix.set_xticks([])
+    axmatrix.set_yticks([])
 
     # colorbar
-    axcolor = fig.add_axes([0.96, 0, 0.02, 0.80])
-    cbar = plt.colorbar(im, cax=axcolor)
+    axcolor = fig.add_axes([0.92, 0.1, 0.02, 0.80])
     axcolor.tick_params(labelsize=10)
-    plt.show()
+    plt.colorbar(im, cax=axcolor)
+    fig.suptitle('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
+        HC_method, HC_metric, thre_dist), fontsize=16)
+    fig.show()
 
     HC_labels = sch.fcluster(Y, thre_dist, criterion='distance')
-    # prepare label data
+    # # prepare label data
     elements, counts = np.unique(HC_labels, return_counts=True)
-    # print(elements, counts)
+    print(elements, counts)
+    sarray1 = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+    for idx, coor in enumerate(localCoor):
+        sarray1[coor[0], coor[1]] = HC_labels[idx]
+
+    fig, ax = plt.subplots(figsize=(6, 8))
+    sarrayIm = ax.imshow(sarray1)
+    fig.colorbar(sarrayIm)
+    ax.set_title('reg{}: HC Clustering'.format(regID), fontsize=15, loc='center')
+    plt.show()
 
     if __name__ != '__main__':  #TODO: Fix PCA loadings and ion imaging
         # loadings = pca.components_.T
@@ -2166,12 +2188,12 @@ def msmlfunc4(mspath, regID, threshold, exprun):
     span = 5
     n_component = _generate_nComponentList(n_components, span)
     repeat = 2
-
+    print("Consider for gmm >>", df_pca_umap.columns[0:nPCs+reducer.n_components])
     for i in range(repeat):  # may repeat several times
         for j in range(n_component.shape[0]):  # ensemble with different n_component value
             StaTime = time.time()
             gmm = GMM(n_components=n_component[j], max_iter=5000)  # max_iter does matter, no random seed assigned
-            labels = gmm.fit_predict(data_umap)     #todo data_umap
+            labels = gmm.fit_predict(df_pca_umap.iloc[:, 0:nPCs+reducer.n_components])     #todo data_umap
             # save data
             index = j + 1 + i * n_component.shape[0]
             title = 'gmm_' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
@@ -2577,11 +2599,11 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
     return specDict
 
 # def rawVSprocessed(rawMSpath, proMSpath):
-def rawVSprocessed(mzraw, abraw, mzpro, abpro):
+def rawVSprocessed(mzraw, abraw, mzpro, abpro, n_spec=None, exprun=None):
     # rawMS = IMZMLExtract(rawMSpath)
     # proMS = IMZMLExtract(proMSpath)
 
-    n_spec = 00 #np.random.randint(len(rawMS.parser.intensityLengths))
+    # n_spec = 00 #np.random.randint(len(rawMS.parser.intensityLengths))
     # mzraw = rawMS.parser.getspectrum(n_spec)[0]
     # abraw = rawMS.parser.getspectrum(n_spec)[1]
     #
@@ -2616,7 +2638,10 @@ def rawVSprocessed(mzraw, abraw, mzpro, abpro):
     ax1.legend(loc='upper right')
     # ax1[1].grid()
 
-    fig.suptitle('A spectrum representation #{}'.format(n_spec), fontsize=12, y=1)
+    if n_spec is not None:
+        fig.suptitle('A spectrum representation #{} {}'.format(n_spec, exprun), fontsize=12, y=1)
+    else:
+        fig.suptitle('A spectrum representation {}'.format(exprun), fontsize=12, y=1)
     # fig.subplots_adjust(top=0.85)
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig.tight_layout(pad=0.2)

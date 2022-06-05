@@ -4,13 +4,13 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Utilities import msmlfunc4, matchSpecLabel2, ImzmlAll, bestWvltForRegion
+from Utilities import msmlfunc4, matchSpecLabel2, ImzmlAll, rawVSprocessed
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import matplotlib as mtl
-mtl.use('TkAgg')    # required for widget slider...
+# mtl.use('TkAgg')    # required for widget slider...
 from scipy.io import loadmat, savemat
 import time
 from imzml import IMZMLExtract, normalize_spectrum
@@ -23,22 +23,30 @@ import h5py
 posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
-regID = 2
-ImzObj = ImzmlAll(mspath)
-# meanSpec = ImzObj.get_mean_abundance()
-spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
-print(spectra2.shape)
-spectra, peak_mz = ImzObj.peak_pick(spectra2, refmz2)   #, meanSpec)
+# ImzObj = ImzmlAll(mspath)
+# (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = ImzObj.get_region_range(2)
+# print((minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx)
+# array3D, array2D, longestmz, regionshape, lCoorIdx=ImzObj.get_region(regID, whole=True)
+# print(array2D.shape)
+# spectra, peak_mz = ImzObj.peak_pick(, refmz2)
 
-print(spectra.shape)
-
-from Utilities import rawVSprocessed
-#
-rawVSprocessed(refmz2, spectra2[1000], peak_mz, spectra[1000])
-
+# +-----------------------+
+# |   processing not ok   |
+# +-----------------------+
+if __name__ != '__main__':
+    ImzObj = ImzmlAll(mspath)
+    regID = 2
+    # meanSpec = ImzObj.get_mean_abundance()
+    spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID, whole=False)
+    print(spectra.shape)
+    smooth_spectra = ImzObj.smooth_spectra(spectra, window_length=9)
+    peak_spectra, peak_mz = ImzObj.peak_pick(smooth_spectra, refmz)   #, meanSpec)
+    print(peak_spectra.shape)
+    rawVSprocessed(refmz, spectra[1000], peak_mz, peak_spectra[1000])
 
 if __name__ != '__main__':
-    msmlfunc4(mspath, regID=regID, threshold=0.95, exprun='for_ANOVA')
+    regID = 5
+    msmlfunc4(mspath, regID=regID, threshold=0.95, exprun='for_ANOVA3')
 
 # print(len(ImzObj.parser.mzLengths), len(ImzObj.parser.coordinates))
 # spectralength = 0
@@ -50,7 +58,7 @@ if __name__ != '__main__':
 #         spectralength = ImzObj.parser.mzLengths[mzidx]
 # print(mzidx, ImzObj.parser.mzLengths[mzidx])
 #
-# spectra2D = [] #np.zeros()
+# spectra2D = [] #np.zeros()q
 # for sidx, coor in enumerate(ImzObj.parser.coordinates):
 #     spectra = ImzObj.parser.getspectrum(sidx)
 #     # print(np.array(spectra).shape)
@@ -74,10 +82,11 @@ if __name__ != '__main__':
 # print(ImzObj.get_region_range(2, whole=False))
 
 if __name__ != '__main__':
+    ImzObj = ImzmlAll(mspath)
     regID = 2
-    spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
+    spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID, whole=True)
     regID = 3
-    spec3D3, spectra3, refmz3, regionshape3, localCoor3 = ImzObj.get_region(regID)
+    spec3D3, spectra3, refmz3, regionshape3, localCoor3 = ImzObj.get_region(regID, whole=True)
 
     print(spec3D2.shape)
     print("2d array 2 >>", spectra2.shape)
@@ -88,40 +97,52 @@ if __name__ != '__main__':
 # +--------------------+
 if __name__ != '__main__':
     ImzObj = ImzmlAll(mspath)
+    regID = 1
+    spec3D1, spectra1, refmz1, regionshape1, localCoor1 = ImzObj.get_region(regID, whole=True)
+    print("len(localCoor1) >>", len(localCoor1))
     regID = 2
-    spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID)
+    spec3D2, spectra2, refmz2, regionshape2, localCoor2 = ImzObj.get_region(regID, whole=True)
     regID = 3
-    spec3D3, spectra3, refmz3, regionshape3, localCoor3 = ImzObj.get_region(regID)
+    spec3D3, spectra3, refmz3, regionshape3, localCoor3 = ImzObj.get_region(regID, whole=True)
+    regID = 5
+    spec3D5, spectra5, refmz5, regionshape5, localCoor5 = ImzObj.get_region(regID, whole=True)
+
+    print("3d reg 1", spec3D1.shape)
+    print("2d reg 1 >>", spectra1.shape)
+
+    print("3d reg 2", spec3D2.shape)
+    print("2d reg 2 >>", spectra2.shape)
+    print("3d reg 3", spec3D3.shape)
+    print("2d reg 3 >>", spectra3.shape)
+    print("3d reg 5", spec3D5.shape)
+    print("2d reg 5 >>", spectra5.shape)
+
+    seg1 = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_1', '*4_1.npy'))[0]
     seg2 = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_2', '*4_1.npy'))[0]
     seg3 = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_3', '*4_1.npy'))[0]
+    seg5 = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_5', '*4_1.npy'))[0]
+
+    label1 = np.load(seg1)
     label2 = np.load(seg2)
     label3 = np.load(seg3)
+    label5 = np.load(seg5)
     # print(np.unique(label2))
     # print(np.unique(label3))
     elements, counts = np.unique(label2, return_counts=True)
     print("label2 >>", elements, counts)
     elements, counts = np.unique(label3, return_counts=True)
     print("label3 >>", elements, counts)
-    print("3d reg 2", spec3D2.shape)
-    print("2d reg 2 >>", spectra2.shape)
-    print("3d reg 3", spec3D3.shape)
-    print("2d reg 3 >>", spectra3.shape)
-
-    plt.subplot(121)
-    plt.imshow(label2 == 2)
-    plt.title("reg2")
-    # plt.colorbar(label)
-    # plt.show()
-    plt.subplot(122)
-    plt.imshow(label3 == 3)
-    plt.title("reg3")
-    plt.show()
 
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-    arrays = [label2, label3]
-    title = ['reg2', 'reg3']
-    fig, axs = plt.subplots(1, 2, figsize=(10, 8), dpi=200, sharex=False)
+    arrays = [label1, label2, label3, label5]
+    title = ['reg1', 'reg2', 'reg3', 'reg5']
+    butterfly_labels = [1, 2, 1, 2] # butterfly
+    peripheral_labels = [3, 3, 2, 1]  # peripheral
+    gm_labels = [2, 1, 4, 3]
+    rest = [4, 4, 3, 4]
+
+    fig, axs = plt.subplots(1, len(title), figsize=(10, 8), dpi=200, sharex=False)
     for ar, tl, ax in zip(arrays, title, axs.ravel()):
         im = ax.imshow(ar)  # , cmap='twilight') #cm)
         ax.set_title(tl, fontsize=20)
@@ -130,68 +151,169 @@ if __name__ != '__main__':
         fig.colorbar(im, cax=cax, ax=ax)
     plt.show()
 
-    # from PIL import Image
-    #
-    # img = Image.fromarray(label2, mode="P")
-    # img.putpalette([
-    #     255, 255, 255,  # index 0
-    #     255, 0, 0,  # index 1
-    #     0, 255, 0,  # index 2
-    #     0, 0, 255,  # index 3
-    #     255, 255, 0])
-    # img.show()
+    fig, axs = plt.subplots(1, len(title), figsize=(10, 8), dpi=200, sharex=False)
+    for ar, tl, ax, bl in zip(arrays, title, axs.ravel(), butterfly_labels):
+        im = ax.imshow(ar==bl)  # , cmap='twilight') #cm)
+        ax.set_title(tl, fontsize=20)
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        fig.colorbar(im, cax=cax, ax=ax)
+    plt.show()
 
     # print(len(np.where(label1 == 1)[0]))
-    spec_lab_2 = [] #np.zeros([len(np.where(label1 == 4)[0]), spectra.shape[1]], dtype=np.float32)
-    spec_lab_3 = [] #np.zeros([len(np.where(label1 == 3)[0]), spectra.shape[1]], dtype=np.float32)
+
     # print(type(localCoor), "\n", localCoor)
-    img = np.zeros([regionshape2[0], regionshape2[1]], dtype=np.float32)
-    for idx, (i, j) in enumerate(zip(np.where(label2 == 2)[0], np.where(label2 == 2)[1])):
-        # print(idx, i, j, np.where(localCoor[:] == (i, j)))
-        for ldx, item in enumerate(localCoor2):
-            if item == (i, j):
-                # print(idx, i, j, ldx)
-                img[i, j] = 2
-                spec_lab_2.append(spectra2[ldx, :])  #[idx, :] = spectra[ldx, :]
-                # break
-    plt.imshow(img)
-    plt.show()
 
-    img = np.zeros([regionshape3[0], regionshape3[1]], dtype=np.float32)
-    for idx, (i, j) in enumerate(zip(np.where(label3 == 3)[0], np.where(label3 == 3)[1])):
-        # print(idx, i, j, np.where(localCoor[:] == (i, j)))
-        for ldx, item in enumerate(localCoor3):
-            if item == (i, j):
-                # print(idx, i, j, ldx)
-                img[i, j] = 2
-                spec_lab_3.append(spectra3[ldx, :])
-                # spec_lab_4[idx, :] = spectra[ldx, :]
-                # break
-    plt.imshow(img)
-    plt.show()
-    spec_lab_2 = np.array(spec_lab_2)
-    spec_lab_3 = np.array(spec_lab_3)
-    print(spec_lab_2.shape, spec_lab_3.shape)
-    from scipy.stats import stats
-    # fvalue, pvalue = stats.f_oneway(np.mean(spec_lab_2, axis=0), np.mean(spec_lab_3, axis=0), axis=0)
-    # fvalue, pvalue = stats.f_oneway(spec_lab_3[0:1000, :], spec_lab_3[1000:, :]) #, axis=0)
-    fvalue, pvalue = stats.f_oneway(spec_lab_2, spec_lab_3)  # , axis=0)
-    # print(spec_lab_3)#.shape, spec_lab_4.shape)
-    print(fvalue)
-    # print(len(fvalue), "\n")
-    print(pvalue)
-    # print(len(pvalue))
-    plt.plot(fvalue)
-    plt.title("F value")
-    plt.show()
-    plt.plot(pvalue)
-    plt.title("p-value")
-    plt.show()
+    Fvalues = []
+    pvalues = []
+    logpvalues = []
 
-    pvalue_log = -np.log10(pvalue)
-    plt.plot(pvalue_log)
-    plt.title("-log10(p-value)")
-    plt.show()
+    for _labels in (butterfly_labels, peripheral_labels, gm_labels, rest):
+        print(_labels)
+        _labels = list(_labels)
+        spec_lab_1 = []
+        spec_lab_2 = []  # np.zeros([len(np.where(label1 == 4)[0]), spectra.shape[1]], dtype=np.float32)
+        spec_lab_3 = []  # np.zeros([len(np.where(label1 == 3)[0]), spectra.shape[1]], dtype=np.float32)
+        spec_lab_5 = []
+        img = np.zeros([regionshape1[0], regionshape1[1]], dtype=np.float32)
+        for idx, (i, j) in enumerate(zip(np.where(label1 == _labels[0])[0], np.where(label1 == _labels[0])[1])):
+            # print(idx, i, j, np.where(localCoor[:] == (i, j)))
+            for ldx, item in enumerate(localCoor1):
+                if item == (i, j):
+                    # print(idx, i, j, ldx)
+                    img[i, j] = 2
+                    spec_lab_1.append(spectra1[ldx, :])  # [idx, :] = spectra[ldx, :]
+
+        img = np.zeros([regionshape2[0], regionshape2[1]], dtype=np.float32)
+        for idx, (i, j) in enumerate(zip(np.where(label2 == _labels[1])[0], np.where(label2 == _labels[1])[1])):
+            # print(idx, i, j, np.where(localCoor[:] == (i, j)))
+            for ldx, item in enumerate(localCoor2):
+                if item == (i, j):
+                    # print(idx, i, j, ldx)
+                    img[i, j] = 2
+                    spec_lab_2.append(spectra2[ldx, :])  #[idx, :] = spectra[ldx, :]
+                    # break
+        plt.imshow(img)
+        plt.show()
+
+        img = np.zeros([regionshape3[0], regionshape3[1]], dtype=np.float32)
+        for idx, (i, j) in enumerate(zip(np.where(label3 == _labels[2])[0], np.where(label3 == _labels[2])[1])):
+            # print(idx, i, j, np.where(localCoor[:] == (i, j)))
+            for ldx, item in enumerate(localCoor3):
+                if item == (i, j):
+                    # print(idx, i, j, ldx)
+                    img[i, j] = 2
+                    spec_lab_3.append(spectra3[ldx, :])
+                    # spec_lab_4[idx, :] = spectra[ldx, :]
+                    # break
+        plt.imshow(img)
+        plt.show()
+        img = np.zeros([regionshape5[0], regionshape5[1]], dtype=np.float32)
+        for idx, (i, j) in enumerate(zip(np.where(label5 == _labels[3])[0], np.where(label5 == _labels[3])[1])):
+            # print(idx, i, j, np.where(localCoor[:] == (i, j)))
+            for ldx, item in enumerate(localCoor5):
+                if item == (i, j):
+                    # print(idx, i, j, ldx)
+                    img[i, j] = 2
+                    spec_lab_5.append(spectra5[ldx, :])
+        plt.imshow(img)
+        plt.show()
+
+        spec_lab_1 = np.array(spec_lab_1)
+        spec_lab_2 = np.array(spec_lab_2)
+        spec_lab_3 = np.array(spec_lab_3)
+        spec_lab_5 = np.array(spec_lab_5)
+        print("b4 1-way >>", spec_lab_2.shape, spec_lab_5.shape)
+        from scipy.stats import stats
+        # fvalue, pvalue = stats.f_oneway(np.mean(spec_lab_2, axis=0), np.mean(spec_lab_3, axis=0), axis=0)
+        # fvalue, pvalue = stats.f_oneway(spec_lab_3[0:1000, :], spec_lab_3[1000:, :]) #, axis=0)
+        Fvalue, pvalue = stats.f_oneway(spec_lab_1, 0.999*spec_lab_1, 0.9987* spec_lab_1, 1.002*spec_lab_1)  # , axis=0)
+        # print(spec_lab_3)#.shape, spec_lab_4.shape)
+        Fvalues.append(Fvalue)
+        pvalues.append(pvalue)
+        print("F >>", Fvalue)
+        # print(len(fvalue), "\n")
+        print("p >>", pvalue, np.sum(pvalue), np.mean(pvalue))
+        # print(len(pvalue))
+        plt.plot(Fvalue)
+        plt.title("F value")
+        plt.show()
+        plt.plot(pvalue)
+        plt.title("p-value")
+        plt.show()
+        break
+    #     pvalue_log = -np.log10(pvalue)
+    #     logpvalues.append(pvalue_log)
+    #     plt.plot(pvalue_log)
+    #     plt.title("-log10(p-value)")
+    #     plt.show()
+    # dANOVA = {'Fvalue':Fvalues,
+    #           'pvalue':pvalues,
+    #           'logpvalue':logpvalues
+    #          }
+    # aPath = os.path.join(os.path.dirname(mspath), 'ANOVA_results.bin')
+    # # print(mzPath)
+    # with open(aPath, 'wb') as pfile:
+    #     pickle.dump(dANOVA, pfile)
+    #
+    # import seaborn as sns
+    # import pandas as pd
+    # p_values = pd.DataFrame(pvalues)
+    # ax = sns.boxplot(data=p_values.T)
+    # plt.show()
+    # Fvalues = pd.DataFrame(Fvalues)
+    # ax = sns.boxplot(data=Fvalues.T)
+    # plt.show()
+    # logp_values = pd.DataFrame(logpvalues)
+    # ax = sns.boxplot(data=logp_values.T)
+    # plt.title("-log10(p-value)")
+    # plt.show()
+
+# +--------------------+
+# |    ANOVA results   |
+# +--------------------+
+if __name__ == '__main__':
+    aPath = os.path.join(os.path.dirname(mspath), 'ANOVA_results.bin')
+    with open(aPath, 'rb') as pfile:
+        dANOVA = pickle.load(pfile)
+    print(dANOVA.keys())
+    pv = dANOVA['pvalue']
+    # print(np.isnan(pv))
+    pv = list(np.nan_to_num(pv, nan=0.98)) #random.uniform(0.95, 1))
+    # print(np.isnan(pv))
+    logpv = -np.log10(pv) #dANOVA['logpvalue']
+    # print(np.shape(pv))  #(4, 36996)
+    # print(logpv)
+    fig, ax1 = plt.subplots(figsize=(10, 6), dpi=600)
+    labels = ['butterfly', 'peripheral', 'gm', 'rest']
+    medianprops = dict(linestyle='-', linewidth=2.5, color='firebrick')
+    meanlineprops = dict(linestyle='--', linewidth=2.5, color='purple')
+    bplot = ax1.boxplot(list(logpv),
+                        notch=False, sym='+', vert=True,
+                        patch_artist=True, whis=1.5, labels=labels,
+                        medianprops=medianprops, meanprops=meanlineprops,
+                        showfliers=True, showmeans=True, meanline=True)
+    ax1.yaxis.grid(True, linestyle='-', which='major', color='gray',
+                   alpha=0.6)
+    ax1.set(
+        axisbelow=True,  # Hide the grid behind plot objects
+        title='',
+        xlabel='Tissues',
+        ylabel='Value')
+    ax1.set_title('ANOVA: -log10(p-value)', fontsize=16)
+    colors = ['maroon', 'darkblue', 'orangered', 'olive']
+    medians = [bplot['medians'][i].get_ydata()[0] for i in range(len(labels))]
+    pos = np.arange(len(labels)) + 1
+    upper_labels = [str(round(s, 2)) for s in medians]
+    for tick, label in zip(range(len(labels)), ax1.get_xticklabels()):
+        ax1.text(pos[tick], .97, upper_labels[tick],
+                 transform=ax1.get_xaxis_transform(),
+                 horizontalalignment='center', fontsize=10,
+                 weight='bold',
+                 color=colors[tick])
+    for patch, color in zip(bplot['boxes'], colors):
+        patch.set_facecolor(color)
+    fig.show()
 
 if __name__ != '__main__':
     seg1_path = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_1', '*4_1.npy'))[0]

@@ -277,9 +277,10 @@ if __name__ == '__main__':
     with open(aPath, 'rb') as pfile:
         dANOVA = pickle.load(pfile)
     print(dANOVA.keys())
+    Fv = dANOVA['Fvalue']
     pv = dANOVA['pvalue']
     # print(np.isnan(pv))
-    pv = list(np.nan_to_num(pv, nan=0.98)) #random.uniform(0.95, 1))
+    pv = np.nan_to_num(pv, nan=0.98) #random.uniform(0.95, 1))
     # print(np.isnan(pv))
     logpv = -np.log10(pv) #dANOVA['logpvalue']
     # print(np.shape(pv))  #(4, 36996)
@@ -288,7 +289,7 @@ if __name__ == '__main__':
     labels = ['butterfly', 'peripheral', 'gm', 'rest']
     medianprops = dict(linestyle='-', linewidth=2.5, color='firebrick')
     meanlineprops = dict(linestyle='--', linewidth=2.5, color='purple')
-    bplot = ax1.boxplot(list(logpv),
+    bplot = ax1.boxplot(list(Fv),
                         notch=False, sym='+', vert=True,
                         patch_artist=True, whis=1.5, labels=labels,
                         medianprops=medianprops, meanprops=meanlineprops,
@@ -300,7 +301,7 @@ if __name__ == '__main__':
         title='',
         xlabel='Tissues',
         ylabel='Value')
-    ax1.set_title('ANOVA: -log10(p-value)', fontsize=16)
+    ax1.set_title('ANOVA: p-value', fontsize=16)
     colors = ['maroon', 'darkblue', 'orangered', 'olive']
     medians = [bplot['medians'][i].get_ydata()[0] for i in range(len(labels))]
     pos = np.arange(len(labels)) + 1

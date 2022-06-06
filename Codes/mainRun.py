@@ -20,6 +20,7 @@ from ms_peak_picker import pick_peaks
 import h5py
 
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
+# posLip = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW'
 posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
 mspath = glob(os.path.join(posLip, '*.imzML'))[0]
 print(mspath)
@@ -45,8 +46,18 @@ if __name__ != '__main__':
     rawVSprocessed(refmz, spectra[1000], peak_mz, peak_spectra[1000])
 
 if __name__ != '__main__':
-    regID = 4
-    msmlfunc4(mspath, regID=regID, threshold=0.95, exprun='for_ANOVA3')
+    ImzObj = ImzmlAll(mspath)
+    array, regs = ImzObj._get_regions()
+    plt.imshow(array) #.T)
+    plt.colorbar()
+    plt.show()
+    # print(regs)
+    regID = 6
+    print(ImzObj.get_region_range(regID, whole=False))
+    print(ImzObj.get_region_range(regID, whole=True))
+    # for i in range(regs):
+    #     print("processing region: ", i+1)
+    #     msmlfunc4(mspath, regID=i+1, threshold=0.95, exprun='for_ANOVA3')
 
 # print(len(ImzObj.parser.mzLengths), len(ImzObj.parser.coordinates))
 # spectralength = 0
@@ -95,7 +106,7 @@ if __name__ != '__main__':
 # +--------------------+
 # |        ANOVA       |
 # +--------------------+
-if __name__ != '__main__':
+if __name__ == '__main__':
     ImzObj = ImzmlAll(mspath)
     regID = 1
     spec3D1, spectra1, refmz1, regionshape1, localCoor1 = ImzObj.get_region(regID, whole=True)
@@ -147,7 +158,7 @@ if __name__ != '__main__':
 
     arrays = [label1, label2, label3, label4, label5]
     title = ['reg1', 'reg2', 'reg3', 'reg4', 'reg5']
-    butterfly_labels = [1, 2, 1, 2, 2] # butterfly
+    butterfly_labels = [1, 2, 1, 2, 2]  # butterfly
     peripheral_labels = [3, 3, 2, 3, 1]  # peripheral
     gm_labels = [2, 1, 4, 1, 3] # u-shape
     rest = [4, 4, 3, 4, 4]
@@ -277,7 +288,8 @@ if __name__ != '__main__':
         from scipy.stats import stats
         # fvalue, pvalue = stats.f_oneway(np.mean(spec_lab_2, axis=0), np.mean(spec_lab_3, axis=0), axis=0)
         # fvalue, pvalue = stats.f_oneway(spec_lab_3[0:1000, :], spec_lab_3[1000:, :]) #, axis=0)
-        Fvalue, pvalue = stats.f_oneway(spec_lab_1, spec_lab_2, spec_lab_3, spec_lab_4, spec_lab_4)  # , axis=0)
+        Fvalue, pvalue = stats.f_oneway(spec_lab_1, spec_lab_2, spec_lab_3, spec_lab_4, spec_lab_5)  # , axis=0)
+        # Fvalue, pvalue = stats.f_oneway(spec_lab_1, spec_lab_1, spec_lab_1, spec_lab_1, spec_lab_1)  # all same test
         # print(spec_lab_3)#.shape, spec_lab_4.shape)
         Fvalues.append(Fvalue)
         pvalues.append(pvalue)
@@ -322,7 +334,7 @@ if __name__ != '__main__':
 # +--------------------+
 # |    ANOVA results   |
 # +--------------------+
-if __name__ != '__main__':
+if __name__ == '__main__':
     aPath = os.path.join(os.path.dirname(mspath), 'ANOVA_results_all5.bin')
     with open(aPath, 'rb') as pfile:
         dANOVA = pickle.load(pfile)
@@ -330,7 +342,7 @@ if __name__ != '__main__':
     Fv = dANOVA['Fvalue']
     pv = dANOVA['pvalue']
     # print(np.isnan(pv))
-    pv = np.nan_to_num(pv, nan=0.98) #random.uniform(0.95, 1))
+    pv = np.nan_to_num(pv, nan=0.98) # why? if similar then p-value is closer to 1
     # print(np.isnan(pv))
     logpv = -np.log10(pv) #dANOVA['logpvalue']
     # print(np.shape(pv))  #(4, 36996)
@@ -369,7 +381,7 @@ if __name__ != '__main__':
 # +--------------------+
 # |    match regions   |
 # +--------------------+
-if __name__ == '__main__':
+if __name__ != '__main__':
     # seg1_path = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_1', '*4_1.npy'))[0]
     # seg2_path = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_2', '*4_1.npy'))[0]
     # seg3_path = glob(os.path.join(r'/media/banikr/DATA/MALDI/demo_banikr_/reg_3', '*4_1.npy'))[0]

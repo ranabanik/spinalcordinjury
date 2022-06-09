@@ -55,7 +55,8 @@ class ImzmlAll(object):
             spec (list/numpy.array, optional): spectrum
             masses (list): list of corresponding m/z values (same length as spectra)
             masses_new (list): list of m/z values
-            method (str, optional):  Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
+            method (str, optional):  Method to use to interpolate the spectra: "akima",
+            "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
 
         Returns:
             lisr: updatedd spectrum
@@ -2534,7 +2535,7 @@ def matchSpecLabel(seg1, seg2, arr1, arr2, plot_fig=True): #Done: implement for 
 def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
     """
     seg1 & seg2: segmentation file path(.npy)
-    Comparison of segmentation between two region arrays (3D)
+    Comparison of segmentation between two region arrays' (3D) mean
     exprun: string command, name the experiment run
     e.g.: matchSpecLabel2(True, seg1_path, seg2_path, seg3_path, seg4_path, arr1=spec_array1,
                                                                         arr2=spec_array2,
@@ -2549,7 +2550,7 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
         # print(np.unique(label))
         segList.append(label)
         title.append(key)
-        for l in range(1, len(np.unique(label))):
+        for l in range(1, len(np.unique(label))): # 0 is background
             label_ = copy.deepcopy(label)
             label_[label != l] = 0
             spec = np.mean(value[np.where(label_)], axis=0)
@@ -2724,10 +2725,11 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
     return specDict
 
 # def rawVSprocessed(rawMSpath, proMSpath):
-def rawVSprocessed(mzraw, abraw, mzpro, abpro, n_spec=None, exprun=None):
+def rawVSprocessed(mzraw, abraw, mzpro, abpro, labels=None, n_spec=None, exprun=None):
     # rawMS = IMZMLExtract(rawMSpath)
     # proMS = IMZMLExtract(proMSpath)
-
+    if labels is None:
+        labels = ['raw', 'processed']
     # n_spec = 00 #np.random.randint(len(rawMS.parser.intensityLengths))
     # mzraw = rawMS.parser.getspectrum(n_spec)[0]
     # abraw = rawMS.parser.getspectrum(n_spec)[1]
@@ -2737,32 +2739,33 @@ def rawVSprocessed(mzraw, abraw, mzpro, abpro, n_spec=None, exprun=None):
 
     fig, ax = plt.subplots(2, 1, dpi=100)
 
-    ax[0].hist(mzraw, color=(0.9, 0, 0), linewidth=1.5, label='raw', bins=200)  # , alpha=0.9)
+    ax[0].hist(mzraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0], bins=200)  # , alpha=0.9)
     ax[0].set_xlabel("m/z", fontsize=12)
     ax[0].set_ylabel("counts", fontsize=12, color=(0.9, 0, 0))
     ax[0].legend(loc='upper center')
     ax[0].grid()
 
-    ax[1].plot(mzraw, abraw, color=(0.9, 0, 0), linewidth=1.5, label='raw')  # , alpha=0.9)
+    ax[1].plot(mzraw, abraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0])  # , alpha=0.9)
     ax[1].set_xlabel("m/z", fontsize=12)
     ax[1].set_ylabel("intensity", fontsize=12, color=(0.9, 0, 0))
     ax[1].legend(loc='upper center')
     ax[1].grid()
 
     ax0 = ax[0].twinx()
-    ax0.hist(mzpro, color=(0, 0, 0.9), linewidth=1.5, label='processed', bins=200, alpha=0.5)
+    ax0.hist(mzpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], bins=200, alpha=0.5)
     ax0.set_xlabel("m/z", fontsize=12)
     ax0.set_ylabel("counts", fontsize=12, color=(0, 0, 0.9), alpha=0.5)
     ax0.legend(loc='upper right')
     # ax0[0].grid()
 
     ax1 = ax[1].twinx()
-    ax1.plot(mzpro, abpro, color=(0, 0, 0.9), linewidth=1.5, label='processed', alpha=0.5)
+    ax1.plot(mzpro, abpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], alpha=0.5)
     ax1.set_xlabel("m/z", fontsize=12)
     ax1.set_ylabel("intensity", fontsize=12, color=(0, 0, 0.9), alpha=0.5)
     ax1.legend(loc='upper right')
     # ax1[1].grid()
-
+    ax[0].set_title("Binning - histogram")
+    ax[1].set_title("Spectra")
     if n_spec is not None:
         fig.suptitle('A spectrum representation #{} {}'.format(n_spec, exprun), fontsize=12, y=1)
     else:

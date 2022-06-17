@@ -25,7 +25,7 @@ import hdbscan
 import matplotlib as mtl
 import matplotlib.cm as cm
 import seaborn as sns
-from pyimzml.ImzMLParser import ImzMLParser
+from pyimzml.ImzMLParser import ImzMLParser, _bisect_spectrum
 from ms_peak_picker import pick_peaks
 # from imzml import IMZMLExtract, normalize_spectrum
 from matchms import Spectrum, calculate_scores
@@ -90,13 +90,10 @@ class ImzmlAll(object):
         return global2index
 
     def _get_regions(self):
-        maxX = 0
-        maxY = 0
-        for idx, coord in enumerate(self.parser.coordinates):
-            maxX = max(maxX, coord[0])
-            maxY = max(maxY, coord[1])
+        maxX = self.parser.imzmldict['max count of pixels x']
+        maxY = self.parser.imzmldict['max count of pixels y']
         img = np.zeros((maxX + 1, maxY + 1))
-
+        print("here", maxX, maxY)
         for coord in self.parser.coordinates:
             img[coord[0], coord[1]] = 1
 
@@ -204,6 +201,37 @@ class ImzmlAll(object):
             # lCoorIdx[idx].append(gcoord2index[coord]) # {0: [1182], 1: [1266], 2: [1350], 3: [1434]
             lCoorIdx.append((xpos, ypos))
         return array3D, array2D, longestmz, regionshape, lCoorIdx # regionPixels
+
+    def resample_region(self, regID, tol):
+        minmz = np.inf
+        maxmz = -np.inf
+        for s in range(len(self.parser.mzLengths)):
+            minmz = min(self.parser.getspectrum(s)[0][0], minmz)
+            maxmz = max(self.parser.getspectrum(s)[0][-1], maxmz)
+        # print(minmz, maxmz)
+        massrange = np.arange(minmz, maxmz, tol)
+        gcoord2index = self._global2index()
+        (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range(regID)
+        regionshape = [maxx-minx+1,
+                       maxy-miny+1]
+        if maxz-minz+1 > 1:
+            regionshape.append(maxz-minz+1)
+        regionshape.append(len(massrange))
+        regionPixels = self.get_region_pixels(regID)
+        array2D = np.zeros([len(regionPixels), len(massrange)], dtype=np.float32)
+        array3D = np.zeros(regionshape, dtype=np.float32)
+        nS = np.random.randint(len(regionPixels))
+        for idx, coord in enumerate(regionPixels):
+            xpos = coord[0] - minx
+            ypos = coord[1] - miny
+            mzs, ints = self.parser.getspectrum(gcoord2index[coord])
+            for jdx, mz_value in enumerate(massrange):
+                min_i, max_i = _bisect_spectrum(mzs, mz_value, tol)
+                array2D[idx, jdx] = array3D[xpos, ypos, jdx] = sum(ints[min_i:max_i + 1])
+            if idx == nS:
+                print("Resampling: #{}".format(nS))
+                rawVSprocessed(mzs, ints, massrange, array2D[nS, :], n_spec=nS, exprun='Resampling')
+        return array2D, array3D, massrange
 
     def smooth_spectra(self, spectra, method="savgol", window_length=5, polyorder=2):
         assert (method in ["savgol", "gaussian"])
@@ -2736,7 +2764,8 @@ def rawVSprocessed(mzraw, abraw, mzpro, abpro, labels=None, n_spec=None, exprun=
     #
     # mzpro = proMS.parser.getspectrum(n_spec)[0]
     # abpro = proMS.parser.getspectrum(n_spec)[1]
-
+    rawz_ = np.array(abraw).nonzero()
+    proz_ = np.array(abpro).nonzero()
     fig, ax = plt.subplots(2, 1, dpi=100)
 
     ax[0].hist(mzraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0], bins=200)  # , alpha=0.9)
@@ -2745,7 +2774,9 @@ def rawVSprocessed(mzraw, abraw, mzpro, abpro, labels=None, n_spec=None, exprun=
     ax[0].legend(loc='upper center')
     ax[0].grid()
 
-    ax[1].plot(mzraw, abraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0])  # , alpha=0.9)
+    # ax[1].plot(mzraw, abraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0])  # , alpha=0.9)
+    # ax[1].plot(mzraw[rawz_], abraw[rawz_], marker='r^')
+    ax[1].vlines(mzraw, [0], abraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0])  # , alpha=0.9)
     ax[1].set_xlabel("m/z", fontsize=12)
     ax[1].set_ylabel("intensity", fontsize=12, color=(0.9, 0, 0))
     ax[1].legend(loc='upper center')
@@ -2759,7 +2790,9 @@ def rawVSprocessed(mzraw, abraw, mzpro, abpro, labels=None, n_spec=None, exprun=
     # ax0[0].grid()
 
     ax1 = ax[1].twinx()
-    ax1.plot(mzpro, abpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], alpha=0.5)
+    # ax1.plot(mzpro, abpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], alpha=0.5)
+    # ax1.plot(mzpro[proz_], abpro[proz_], marker='bo')
+    ax1.vlines(mzpro, [0], abpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], alpha=0.5)
     ax1.set_xlabel("m/z", fontsize=12)
     ax1.set_ylabel("intensity", fontsize=12, color=(0, 0, 0.9), alpha=0.5)
     ax1.legend(loc='upper right')

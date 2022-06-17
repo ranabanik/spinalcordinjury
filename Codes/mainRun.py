@@ -16,7 +16,8 @@ from scipy.stats import stats
 import seaborn as sns
 import pandas as pd
 import time
-from imzml import IMZMLExtract, normalize_spectrum
+from imzml import IMZMLExtract, normalize_spectrum, getionimage
+from pyimzml.ImzMLParser import _bisect_spectrum
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy import interpolate
 from pyimzml.ImzMLParser import ImzMLParser
@@ -32,8 +33,7 @@ posLipNew4 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate4A_poslipid
 
 pathList = [posLip, posLipNew, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
-
-
+# print(mspathList)
 def _boxplot(data, labels):
     fig, ax1 = plt.subplots(figsize=(10, 6), dpi=600)
     # labels = ['old', 'new']
@@ -71,6 +71,316 @@ def _boxplot(data, labels):
         patch.set_facecolor('slategrey')
     fig.show()
 
+# +--------------------------------------+
+# |   resampling > peak-picking image    |
+# +--------------------------------------+
+if __name__ == '__main__':
+    ImzObj = ImzmlAll(mspathList[0])
+    regID = 1
+    tol = 0.02
+    regname = os.path.join(os.path.dirname(mspathList[0]), 'reg_{}_tol_{}.h5'.format(regID, tol))
+    f = h5py.File(regname, 'r')
+    # print(f.keys())
+    r2d = np.array(f['2D'])
+    r3d = np.array(f['3D'])
+    mzrange = np.array(f['mzrange'])
+
+    # print(r2d.shape, r3d.shape)
+    #
+
+    spectra_peak_picked, peakmzs = ImzObj.peak_pick(r2d, refmz=mzrange)
+    mzs, ints = map(lambda x: np.asarray(x), ImzObj.parser.getspectrum(15))
+    print(type(mzs), type(ints), type(r2d), type(mzrange), "\n", type(spectra_peak_picked),
+          type(peakmzs))
+
+    # plt.plot(peakmzs, spectra[1593, :])
+    # plt.show()
+    #
+
+    # plt.subplot(211)
+    # plt.plot(mrange, r2d[15, :])
+    # # plt.show()
+    # plt.subplot(212)
+    # plt.plot(peakmzs, spectra[15, :])
+    # plt.show()
+    # plt.stem()
+    # fig, vax = plt.subplots(figsize=(12, 6))
+    # vax.vlines(np.array(peakmzs), [0], spectra_peak_picked[2093, :], color=(1, 0, 0), alpha=0.5)
+    # plt.vlines(, , 0, 1, transform=vax.get_xaxis_transform())
+    # plt.show()
+    from sklearn.preprocessing import MinMaxScaler
+    from Utilities import normalize_spectrum
+    mms = MinMaxScaler()
+    nS = 3135
+    abraw = normalize_spectrum(r2d[nS, :], normalize='tic')
+    abpro = normalize_spectrum(spectra_peak_picked[nS, :], normalize='tic')
+    rawVSprocessed(mzrange, abraw,
+                   np.array(peakmzs), abpro, exprun='resmapling+peak-picking')
+    array3D, array2D, longestmz, regionshape, lCoorIdx = ImzObj.get_region(regID)
+    peak3D = np.zeros([regionshape[0], regionshape[1], len(peakmzs)])
+    for idx, coord in enumerate(lCoorIdx):
+        peak3D[coord[0], coord[1], :] = spectra_peak_picked[idx, :]
+
+    peakvar = []
+    for mz in range(len(peakmzs)):
+        peakvar.append(np.std(peak3D[..., mz]))
+
+    # plt.plot(peakvar)
+    # plt.show()
+
+    peakvarHigh_Low = sorted(peakvar, reverse=True)
+    # max_value = max(peakvar)
+    plt.plot(peakvarHigh_Low)
+    plt.show()
+    cdict2 = {'red': ((0.0, 0.0, 0.0),
+                      (0.5, 0.0, 1.0),
+                      (1.0, 0.1, 1.0)),
+
+              'green': ((0.0, 0.0, 0.0),
+                        (1.0, 0.0, 0.0)),
+
+              'blue': ((0.0, 0.0, 0.1),
+                       (0.5, 1.0, 0.0),
+                       (1.0, 0.0, 0.0))
+              }
+
+    cdict3 = {'red': ((0.0, 0.0, 0.0),
+                      (0.25, 0.0, 0.0),
+                      (0.5, 0.8, 1.0),
+                      (0.75, 1.0, 1.0),
+                      (1.0, 0.4, 1.0)),
+
+              'green': ((0.0, 0.0, 0.0),
+                        (0.25, 0.0, 0.0),
+                        (0.5, 0.9, 0.9),
+                        (0.75, 0.0, 0.0),
+                        (1.0, 0.0, 0.0)),
+
+              'blue': ((0.0, 0.0, 0.4),
+                       (0.25, 1.0, 1.0),
+                       (0.5, 1.0, 0.8),
+                       (0.75, 0.0, 0.0),
+                       (1.0, 0.0, 0.0))
+              }
+    colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
+    n_bin = 100
+    import matplotlib as mpl
+    from matplotlib.colors import LinearSegmentedColormap
+    # mpl.colormaps.register(LinearSegmentedColormap('BlueRed2', cdict2))
+    # mpl.colormaps.register(LinearSegmentedColormap('BlueRed3', cdict3))
+    mpl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
+    topN = 50
+    topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-topN:])
+    # for pv in peakvarHigh_Low[0:10]:
+    #     plt.imshow(peak3D[..., peakvar.index(pv)].T, origin='lower', cmap='simple_list')
+    #     plt.colorbar()
+    #     mz = peakmzs[peakvar.index(pv)]
+    #     plt.title("{}".format(mz))
+    #     plt.show()
+
+    # for pv in topmzInd:
+    #     plt.imshow(peak3D[..., pv].T, origin='lower', cmap='simple_list')
+    #     plt.colorbar()
+    #     mz = peakmzs[pv]
+    #     plt.title("{}".format(mz))
+    #     plt.show()
+
+    # peakvarLow_High = sorted(peakvar)
+    # plt.plot(peakvarLow_High)
+    # plt.show()
+
+    # for mz in peakvarLow_High[200:210]:
+    #     plt.imshow(peak3D[..., peakvar.index(mz)].T, cmap='simple_list')
+    #     plt.colorbar()
+    #     plt.title("{}".format(peakmzs[peakvar.index(mz)]))
+    #     plt.show()
+    if __name__ != '__main__':
+        Nr = 10
+        Nc = 5
+        heights = [regionshape[1] for r in range(Nr)]
+        widths = [regionshape[0] for r in range(Nc)]
+        print(heights, widths)
+
+        fig_width = 5.  # inches
+        fig_height = fig_width * sum(heights) / sum(widths)
+        fig, axs = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600, constrained_layout=True,
+                                gridspec_kw={'height_ratios': heights})
+        fig.suptitle('reg {}: ion images'.format(regID), y=0.99)
+
+        images = []
+        pv = 0
+        for r in range(Nr):
+            for c in range(Nc):
+                # Generate data with a range that varies from one plot to the next.
+                # data = ((1 + i + j) / 10) * np.random.rand(10, 20)
+                images.append(axs[r, c].imshow(peak3D[..., topmzInd[pv]].T, origin='lower', cmap='simple_list')) # 'RdBu_r')) #
+                axs[r, c].label_outer()
+                axs[r, c].set_axis_off()
+                axs[r, c].set_title('{}'.format(peakmzs[topmzInd[pv]]), fontsize=5, pad=0.25)
+                # fig.set_tight_layout('tight')
+                # plt.gca().set_axis_off()
+                fig.subplots_adjust(top=0.95, bottom=0.02, left=0,
+                                    right=1, hspace=0.14, wspace=0)
+                # fig.margins(0, 0)
+                # fig.gca().xaxis.set_major_locator(plt.NullLocator())
+                # fig.gca().yaxis.set_major_locator(plt.NullLocator())
+                pv += 1
+
+        # from matplotlib import colors
+        # Find the min and max of all colors for use in setting the color scale.
+        # vmin = min(image.get_array().min() for image in images)
+        # vmax = max(image.get_array().max() for image in images)
+        # norm = colors.Normalize(vmin=vmin, vmax=vmax)
+        # for im in images:
+        #     im.set_norm(colors)
+
+        # fig.colorbar(images[0], ax=axs, orientation='vertical', fraction=.2)
+
+
+        # Make images respond to changes in the norm of other images (e.g. via the
+        # "edit axis, curves and images parameters" GUI on Qt), but be careful not to
+        # recurse infinitely!
+        def update(changed_image):
+            for im in images:
+                if (changed_image.get_cmap() != im.get_cmap()
+                        or changed_image.get_clim() != im.get_clim()):
+                    im.set_cmap(changed_image.get_cmap())
+                    im.set_clim(changed_image.get_clim())
+                    im.set_tight_layout('tight')
+
+        for im in images:
+            im.callbacks.connect('changed', update)
+
+        # fig.set_constrained_layout_pads(w_pad=4 / 72, h_pad=4 / 72, hspace=0,
+        #                                 wspace=0)
+        # fig.tight_layout('tight')
+        # fig.set_axis_off()
+        # fig.tight_layout()
+        plt.show()
+    nS = np.random.randint(spectra_peak_picked.shape[0])
+    print(spectra_peak_picked.shape, nS)
+    print(lCoorIdx[nS])
+    # plt.plot()
+
+    import matplotlib.collections as collections
+
+    t = np.arange(0.0, 2, 0.01)
+    s1 = peak3D[lCoorIdx[nS][0], lCoorIdx[nS][1], :]#np.sin(2 * np.pi * t)
+    s2 = 1.2 * np.sin(4 * np.pi * t)
+    # print("s2>0", s2>0)
+    fig, ax = plt.subplots(figsize=(8, 8))
+    # plt.ion()
+    # ax.set_title('using span_where')
+    markerline, stemlines, baseline = ax.stem(
+        peakmzs, s1, linefmt='cyan', markerfmt="", basefmt="", use_line_collection=True) #
+    # markerline.set_markerfacecolor('none')
+    # ax.axhline(0, color='black', lw=2)
+    for t in topmzInd:
+        print(t)
+        ax.axvspan(peakmzs[t]-0.02, peakmzs[t]+0.02, zorder=0.6, facecolor='blue')#, alpha=0.5)
+        # fig.canvas.draw()
+        # fig.canvas.flush_events()
+    # collection = collections.BrokenBarHCollection.span_where(
+    #     np.array(peakmzs), ymin=0, ymax=max(s1), where=[topmzInd], facecolor='black', alpha=0.5)
+    # ax.add_collection(collection)
+
+    # collection = collections.BrokenBarHCollection.span_where(
+    #     t, ymin=-1, ymax=0, where=s1 < 0, facecolor='red', alpha=0.5)
+    # ax.add_collection(collection)
+    from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes
+    from mpl_toolkits.axes_grid1.inset_locator import mark_inset
+    # Make the zoom-in plot:
+    x1 = 595
+    x2 = 610
+    y1 = 0
+    y2 = 1e6 #max(s1)
+    axins = zoomed_inset_axes(ax, zoom=30, loc=1)#, bbox_transform=ax.figure.transFigure)  # zoom = 2
+    axins.plot(peakmzs, s1)
+    axins.set_xlim(x1, x2)
+    axins.set_ylim(y1, y2)
+    plt.xticks(visible=True)
+    plt.yticks(visible=True)
+    mark_inset(ax, axins, loc1=2, loc2=4, fc="none", ec="0.5")
+    plt.draw()
+    plt.show()
+
+# +-----------------------+
+# |     ion image         |
+# +-----------------------+
+if __name__ != '__main__':
+    ImzObj = ImzmlAll(mspathList[0])
+    # print(ImzObj.parser.mzLengths)
+    dict_ = ImzObj.parser.imzmldict
+    print(dict_)
+    # ImzObj._get_regions()
+    im = getionimage(ImzObj.parser, mz_value=800, tol=0.02)
+    plt.imshow(im)
+    plt.colorbar()
+    plt.show()
+    # minmz = np.inf
+    # maxmz = -np.inf
+    # for s in range(len(ImzObj.parser.mzLengths)):
+    #     minmz = min(ImzObj.parser.getspectrum(s)[0][0], minmz)
+    #     maxmz = max(ImzObj.parser.getspectrum(s)[0][-1], maxmz)
+    # print(minmz, maxmz)
+    # tol = 0.01
+    # massrange = np.arange(minmz, maxmz, tol)
+    # print(massrange.shape, "massrange")
+    # mzs, ints = ImzObj.parser.getspectrum(153)
+    # print(ints, mzs)
+    regID = 1
+    tol = 0.02
+    r2d, r3d, mrange = ImzObj.resample_region(regID, tol=tol)
+    print(r2d.shape, r3d.shape)
+    regname = os.path.join(os.path.dirname(mspathList[0]), 'reg_{}_tol_{}.h5'.format(regID, tol))
+    with h5py.File(regname, 'w') as pfile:
+        pfile['2D'] = r2d
+        pfile['3D'] = r3d
+        pfile['mzrange'] = mrange
+        # pfile['peakmzs'] = peakmzs
+
+    # mzs, ints = map(lambda x: np.asarray(x), p.getspectrum(i))
+    # print("ok", np.sum(np.where(mzs<mz_value-tol, 1, 0)), np.sum(np.where(mzs<mz_value+tol, 1, 0)))
+    # from bisect import bisect_left, bisect_right
+    # def _bisect_spectrum(mzs, mz_value, tol):
+    #     ix_l, ix_u = bisect_left(mzs, mz_value - tol), bisect_right(mzs, mz_value + tol) - 1
+    #     if ix_l == len(mzs):
+    #         return len(mzs), len(mzs)
+    #     if ix_u < 1:
+    #         return 0, 0
+    #     if ix_u == len(mzs):
+    #         ix_u -= 1
+    #     if mzs[ix_l] < (mz_value - tol):
+    #         ix_l += 1
+    #     if mzs[ix_u] > (mz_value + tol):
+    #         ix_u -= 1
+    #     return ix_l, ix_u
+    # int_ = np.zeros_like(massrange)
+    # for idx, mz_value in enumerate(massrange):
+    #     min_i, max_i = _bisect_spectrum(mzs, mz_value, tol)
+    #     # print(">>",min_i, max_i+1, reduce_func(ints[min_i:max_i+1]), "\n")
+    #     int_[idx] = sum(ints[min_i:max_i + 1])
+    # # print(idx)
+
+    # masses = ImzObj.parser.getspectrum(1593)[0]
+    # spec_new = ImzObj._interpolate_spectrum(ints, mzs, massrange, method="Pchip")
+    # rawVSprocessed(mzs, ints, massrange, int_, labels=['old data', 'corrected'],
+    #                exprun='{} tolerance'.format(tol))
+
+    # rawVSprocessed(mzs, ints, massrange, spec_new, labels=['old data', 'corrected'],
+    #                exprun='{} tolerance'.format(tol))
+    # intensity = np.zeros(len(massrange)-1)
+    # for i in range(len(massrange)-1):
+    #     intensity[i] = sum()
+
+    # plt.subplot(2, 1, 1)
+    # plt.plot(masses, spec)
+    # plt.subplot(2, 1, 2)
+    # plt.plot(massrange, spec_new)
+    # plt.show()
+
+    # np.median()
+    # for spectra in range(len(ImzObj.parser.mzLengths)):
 # (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = ImzObj.get_region_range(2)
 # print((minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx)
 # array3D, array2D, longestmz, regionshape, lCoorIdx=ImzObj.get_region(regID, whole=True)
@@ -142,7 +452,7 @@ if __name__ != '__main__':
     masses1 = ImzObj1.parser.getspectrum(max_index1 - 10)[0]
     spec1 = ImzObj1.parser.getspectrum(max_index1 - 10)[1]
 
-    # spec_new = ImzObj._interpolate_spectrum(spec, masses, masses_new, method="Pchip")
+    spec_new = ImzObj._interpolate_spectrum(spec, masses, masses_new, method="Pchip")
 
 
     # plt.plot(ImzObj.parser.mzLengths)
@@ -267,7 +577,7 @@ if __name__ != '__main__':
 # +----------------+
 # |   old vs new   |
 # +----------------+
-if __name__ == '__main__':
+if __name__ != '__main__':
     labels = ['old', 'new1', 'new2', 'new3', 'new4']
     allImzs = []
     for i in mspathList:
@@ -612,7 +922,7 @@ if __name__ != '__main__':
         print("b4 1-way >>", spec_lab_2.shape, spec_lab_5.shape)
         # fvalue, pvalue = stats.f_oneway(np.mean(spec_lab_2, axis=0), np.mean(spec_lab_3, axis=0), axis=0)
         # fvalue, pvalue = stats.f_oneway(spec_lab_3[0:1000, :], spec_lab_3[1000:, :]) #, axis=0)
-        Fvalue, pvalue = stats.f_oneway(spec_lab_1, spec_lab_2, spec_lab_3, spec_lab_4, spec_lab_5)  # , axis=0)
+        Fvalue, pvalue = stats.f_oneway(spec_lab_1, spec_lab_1, spec_lab_1, spec_lab_1, spec_lab_1)  # , axis=0)
         # Fvalue, pvalue = stats.f_oneway(spec_lab_1, spec_lab_1, spec_lab_1, spec_lab_1, spec_lab_1)  # all same test
         # print(spec_lab_3)#.shape, spec_lab_4.shape)
         Fvalues.append(Fvalue)
@@ -633,6 +943,7 @@ if __name__ != '__main__':
         plt.plot(pvalue_log)
         plt.title("-log10(p-value)")
         plt.show()
+        break
     dANOVA = {'Fvalue': Fvalues,
               'pvalue': pvalues,
               'logpvalue': logpvalues

@@ -23,6 +23,7 @@ from sklearn.cluster import AgglomerativeClustering
 from umap import UMAP
 import hdbscan
 import matplotlib as mtl
+from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
 import seaborn as sns
 from pyimzml.ImzMLParser import ImzMLParser, _bisect_spectrum
@@ -93,10 +94,8 @@ class ImzmlAll(object):
         maxX = self.parser.imzmldict['max count of pixels x']
         maxY = self.parser.imzmldict['max count of pixels y']
         img = np.zeros((maxX + 1, maxY + 1))
-        print("here", maxX, maxY)
         for coord in self.parser.coordinates:
             img[coord[0], coord[1]] = 1
-
         labeled_array, num_features = ndimage.label(img, structure=np.ones((3, 3)))
         # print("There are {} regions.".format(num_features))
         return labeled_array, num_features
@@ -169,7 +168,8 @@ class ImzmlAll(object):
                     spectralength = self.parser.mzLengths[mzidx]
             return (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx
 
-    def get_region(self, regID, whole=False):
+    def get_region_data(self, regID, whole=False):
+        "data structure/matrix of the region"
         # if whole:
         #     (minx, maxx), (miny, maxy), (minz, maxz), spectralength, mzidx = self.get_region_range()
         # else:
@@ -196,13 +196,16 @@ class ImzmlAll(object):
             if idx == nS:
                 print("Plotting interpolation: #{}".format(nS))
                 rawVSprocessed(spectra[0], spectra[1], longestmz, interp_spectra, n_spec=nS, exprun='Interpolation')
-            array3D[xpos, ypos, :] = interp_spectra
+            # array3D[xpos, ypos, :] = interp_spectra
             array2D[idx, :] = interp_spectra
             # lCoorIdx[idx].append(gcoord2index[coord]) # {0: [1182], 1: [1266], 2: [1350], 3: [1434]
             lCoorIdx.append((xpos, ypos))
-        return array3D, array2D, longestmz, regionshape, lCoorIdx # regionPixels
+        return array2D, longestmz, regionshape, lCoorIdx # array3D, regionPixels
 
-    def resample_region(self, regID, tol):
+    def resample_region(self, regID, tol=0.02, savedata=True):
+        """
+        resamples spectra with equal bin width. Considers m/z range for all sections/regions
+        """
         minmz = np.inf
         maxmz = -np.inf
         for s in range(len(self.parser.mzLengths)):
@@ -219,7 +222,7 @@ class ImzmlAll(object):
         regionshape.append(len(massrange))
         regionPixels = self.get_region_pixels(regID)
         array2D = np.zeros([len(regionPixels), len(massrange)], dtype=np.float32)
-        array3D = np.zeros(regionshape, dtype=np.float32)
+        # array3D = np.zeros(regionshape, dtype=np.float32)
         nS = np.random.randint(len(regionPixels))
         for idx, coord in enumerate(regionPixels):
             xpos = coord[0] - minx
@@ -227,11 +230,17 @@ class ImzmlAll(object):
             mzs, ints = self.parser.getspectrum(gcoord2index[coord])
             for jdx, mz_value in enumerate(massrange):
                 min_i, max_i = _bisect_spectrum(mzs, mz_value, tol)
-                array2D[idx, jdx] = array3D[xpos, ypos, jdx] = sum(ints[min_i:max_i + 1])
+                array2D[idx, jdx] = sum(ints[min_i:max_i + 1]) # = array3D[xpos, ypos, jdx]
             if idx == nS:
                 print("Resampling: #{}".format(nS))
                 rawVSprocessed(mzs, ints, massrange, array2D[nS, :], n_spec=nS, exprun='Resampling')
-        return array2D, array3D, massrange
+        if savedata:
+            print("saving resampled data...")
+            regname = os.path.join(os.path.dirname(self.mspath), 'reg_{}_tol_{}.h5'.format(regID, tol))
+            with h5py.File(regname, 'w') as pfile:
+                pfile['2D'] = array2D
+                pfile['mzrange'] = massrange
+        return array2D, massrange # array3D
 
     def smooth_spectra(self, spectra, method="savgol", window_length=5, polyorder=2):
         assert (method in ["savgol", "gaussian"])
@@ -296,10 +305,74 @@ class ImzmlAll(object):
         labeled_array, num_features = self._get_regions()
         meanintensity = []
         for r in range(num_features):
-            array3D, array2D, longestmz, regionshape, lCoorIdx = self.get_region(r+1)
+            array2D, longestmz, regionshape, lCoorIdx = self.get_region_data(r + 1)
             meanintensity.append(np.mean(array2D, axis=0))
         return np.mean(np.array(meanintensity, dtype=np.float32), axis=0)
 
+    def get_ion_images(self, regID, array2D=None, mzrange=None):
+        """
+        For visualization, to see if sufficient ion images coulb be generated...
+        """
+        if any(v is None for v in [array2D, mzrange]):
+            array2D, array3D, mzrange = self.resample_region(regID, tol=0.01)
+        spectra_peak_picked, peakmzs = self.peak_pick(array2D, refmz=mzrange)
+        array2D, longestmz, regionshape, lCoorIdx = self.get_region_data(regID)
+        peak3D = np.zeros([regionshape[0], regionshape[1], len(peakmzs)])
+        for idx, coord in enumerate(lCoorIdx):
+            peak3D[coord[0], coord[1], :] = spectra_peak_picked[idx, :]
+        peakvar = []
+        for mz in range(len(peakmzs)):
+            peakvar.append(np.std(peak3D[..., mz]))
+
+        colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
+        n_bin = 100
+        mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
+        topN = 50   # taking top 50 high variance ion images
+        topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-topN:])
+        Nr = 10
+        Nc = 5
+        heights = [regionshape[1] for r in range(Nr)]
+        widths = [regionshape[0] for r in range(Nc)]
+        fig_width = 5.  # inches
+        fig_height = fig_width * sum(heights) / sum(widths)
+        fig, axs = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600, constrained_layout=True,
+                                gridspec_kw={'height_ratios': heights})
+        fig.suptitle('reg {}: ion images'.format(regID), y=0.99)
+        images = []
+        pv = 0
+        for r in range(Nr):
+            for c in range(Nc):
+                # Generate data with a range that varies from one plot to the next.
+                images.append(axs[r, c].imshow(peak3D[..., topmzInd[pv]].T, origin='lower',
+                                               cmap='simple_list'))  # 'RdBu_r')) #
+                axs[r, c].label_outer()
+                axs[r, c].set_axis_off()
+                axs[r, c].set_title('{}'.format(peakmzs[topmzInd[pv]]), fontsize=5, pad=0.25)
+                fig.subplots_adjust(top=0.95, bottom=0.02, left=0,
+                                    right=1, hspace=0.14, wspace=0)
+                pv += 1
+        # Find the min and max of all colors for use in setting the color scale.
+        # vmin = min(image.get_array().min() for image in images)
+        # vmax = max(image.get_array().max() for image in images)
+        # norm = colors.Normalize(vmin=vmin, vmax=vmax)
+        # for im in images:
+        #     im.set_norm(colors)
+
+        # fig.colorbar(images[0], ax=axs, orientation='vertical', fraction=.2)
+
+        # Make images respond to changes in the norm of other images (e.g. via the
+        # "edit axis, curves and images parameters" GUI on Qt), but be careful not to
+        # recurse infinitely!
+        def update(changed_image):
+            for im in images:
+                if (changed_image.get_cmap() != im.get_cmap()
+                        or changed_image.get_clim() != im.get_clim()):
+                    im.set_cmap(changed_image.get_cmap())
+                    im.set_clim(changed_image.get_clim())
+                    im.set_tight_layout('tight')
+        for im in images:
+            im.callbacks.connect('changed', update)
+        plt.show()
 
 class MaldiTofSpectrum(np.ndarray):
     """Numpy NDArray subclass representing a MALDI-TOF Spectrum."""
@@ -1862,7 +1935,7 @@ def msmlfunc4(mspath, regID, threshold, exprun):
         peakmzs = f['peakmzs']
     else:
         ImzObj = ImzmlAll(mspath)
-        spec3D, spectra, refmz, regionshape, localCoor = ImzObj.get_region(regID, whole=False)
+        spectra, refmz, regionshape, localCoor = ImzObj.get_region_data(regID, whole=False)
         spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
         spectra, peakmzs = ImzObj.peak_pick(spectra_smoothed, refmz)
         with h5py.File(regname, 'w') as pfile:

@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Utilities import msmlfunc4, matchSpecLabel2, ImzmlAll, rawVSprocessed
+from Utilities import msmlfunc5, matchSpecLabel2, ImzmlAll, rawVSprocessed
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -34,6 +34,13 @@ posLipNew4 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate4A_poslipid
 pathList = [posLip, posLipNew, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 # print(mspathList)
+
+ImzObj = ImzmlAll(mspathList[0])
+# ImzObj.resample_region(regID=1, tol=0.02, savedata=True)
+ImzObj.get_ion_images(regID=2, peak=False) #, array2D=r2d, mzrange=mzrange)
+# for r in [2, 3, 4, 5]:
+# msmlfunc5(mspathList[0], 1, 0.99, exprun='upsampled', save_rseg=False)
+
 def _boxplot(data, labels):
     fig, ax1 = plt.subplots(figsize=(10, 6), dpi=600)
     # labels = ['old', 'new']
@@ -74,7 +81,7 @@ def _boxplot(data, labels):
 # +--------------------------------------+
 # |   resampling > peak-picking image    |
 # +--------------------------------------+
-if __name__ == '__main__':
+if __name__ != '__main__':
     ImzObj = ImzmlAll(mspathList[0])
     regID = 1
     tol = 0.02

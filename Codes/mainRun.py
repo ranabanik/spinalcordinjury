@@ -37,7 +37,7 @@ mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 
 ImzObj = ImzmlAll(mspathList[0])
 # ImzObj.resample_region(regID=1, tol=0.02, savedata=True)
-ImzObj.get_ion_images(regID=2, peak=False) #, array2D=r2d, mzrange=mzrange)
+ImzObj.get_ion_images(regID=2, peak=True) #, array2D=r2d, mzrange=mzrange)
 # for r in [2, 3, 4, 5]:
 # msmlfunc5(mspathList[0], 1, 0.99, exprun='upsampled', save_rseg=False)
 

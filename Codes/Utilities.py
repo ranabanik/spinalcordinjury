@@ -321,7 +321,7 @@ class ImzmlAll(object):
             meanintensity.append(np.mean(array2D, axis=0))
         return np.mean(np.array(meanintensity, dtype=np.float32), axis=0)
 
-    def get_ion_images(self, regID, array2D=None, mzrange=None, peak=True):
+    def get_ion_images(self, regID, array2D=None, mzrange=None, top=True):
         """
         For visualization, to see if sufficient ion images could be generated...
         peak: plot peak images, default: True
@@ -337,14 +337,15 @@ class ImzmlAll(object):
         colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
         n_bin = 100
         mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
-        topN = 50   # taking top 50 high variance ion images
-        if peak:
+        imgN = 50   # how many images to take and plot
+        if top: # top variance images...
             peakvar = []
             for mz in range(len(peakmzs)):
                 peakvar.append(np.std(peak3D[..., mz]))
             topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-topN:])
-        else:
-            topmzInd = np.round(np.linspace(0, len(peakmzs) - 1, topN)).astype(int)
+            # topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-imgN-3000:-3000])
+        else:   # random
+            topmzInd = np.round(np.linspace(0, len(peakmzs) - 1, imgN)).astype(int)
         Nr = 10
         Nc = 5
         heights = [regionshape[1] for r in range(Nr)]

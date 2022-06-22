@@ -211,10 +211,10 @@ class ImzmlAll(object):
         if os.path.isfile(regname):
             print("Previous upsampling found. Fetching...")
             f = h5py.File(regname, 'r')
-            array2D = f['2D']
+            array2D = f['spectra']
             massrange = f['mzrange']
             regionshape = f['regionshape']
-            lCoorIdx = f['localCoor']
+            lCoorIdx = f['coordinates']
         else:
             print("No previous upsampling found. Performing...")
             minmz = np.inf
@@ -248,10 +248,10 @@ class ImzmlAll(object):
             if savedata:
                 print("saving resampled data...")
                 with h5py.File(regname, 'w') as pfile:
-                    pfile['2D'] = array2D
+                    pfile['spectra'] = array2D
                     pfile['mzrange'] = massrange
                     pfile['regionshape'] = regionshape
-                    pfile['localCoor'] = lCoorIdx
+                    pfile['coordinates'] = lCoorIdx
         return array2D, massrange, regionshape, lCoorIdx
 
     def smooth_spectra(self, spectra, method="savgol", window_length=5, polyorder=2):
@@ -2396,7 +2396,7 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     # _, reg_smooth_, _ = bestWvltForRegion(regSpec, bestWvlt='db8', smoothed_array=True, plot_fig=False)
     reg_norm = np.zeros_like(spectra)
     for s in range(nSpecs):
-        reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='tic')     #reg_smooth_
+        reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='tic')  # max_intensity_spectrum   #reg_smooth_
     reg_norm_ss = makeSS(reg_norm).astype(np.float64)
     # reg_norm_ss = SS(with_mean=True, with_std=True).fit_transform(reg_norm)
     # +----------------+

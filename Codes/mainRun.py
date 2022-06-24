@@ -35,11 +35,135 @@ pathList = [posLip, posLipNew, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 # print(mspathList)
 
-ImzObj = ImzmlAll(mspathList[0])
+# ImzObj = ImzmlAll(mspathList[0])
 # ImzObj.resample_region(regID=1, tol=0.02, savedata=True)
 # ImzObj.get_ion_images(regID=2, peak=True) #, array2D=r2d, mzrange=mzrange)
 # for r in [2, 3, 4, 5]:
-msmlfunc5(mspathList[0], 1, 0.99, exprun='upsampled_clustering', save_rseg=False)
+# msmlfunc5(mspathList[0], 2, 0.99, exprun='upsampled_clustering', save_rseg=False)
+
+# +-----------------------+
+# |      multivariate     |
+# +-----------------------+
+dirname = os.path.dirname(mspathList[0])
+basename = os.path.basename(mspathList[0])
+filename, ext = os.path.splitext(basename)
+regID = 2
+exprun='upsampled_clustering'
+regDir = os.path.join(dirname, 'reg_{}'.format(regID))
+regname = os.path.join(regDir, '{}_reg_{}_{}.h5'.format(filename, regID, exprun))
+f = h5py.File(regname, 'r')
+spectra = np.array(f['spectra'])
+localCoor = list(f['coordinates'])
+regionshape = list(f['regionshape'])
+peakmzs = list(f['peakmzs'])
+print(spectra.shape, '\n', localCoor, '\n', regionshape, '\n', peakmzs)
+nPixels, nBins = spectra.shape
+reg_norm = np.zeros_like(spectra)
+nS = 108#np.random.randint(nPixels)
+
+def tictic(spectrum):
+    ssum = sum(spectrum)
+    if ssum > 0:
+        spectrum /= ssum
+    return spectrum
+
+for s in range(nPixels):
+    ticnorm = tictic(spectra[nS, :]) #normalize_spectrum(spectra[nS, :], normalize='tic')
+    reg_norm[s, :] = (ticnorm-min(ticnorm))/(max(ticnorm)-min(ticnorm))
+    if s == nS:
+        plt.hist(ticnorm)
+        plt.show()
+        plt.hist(reg_norm[s, :])
+        plt.show()
+        fig, ax = plt.subplots(dpi=100)
+        ax.plot(peakmzs, ticnorm, 'r', alpha=1.0)
+        ax0 = ax.twinx()
+        ax0.plot(peakmzs, reg_norm[s, :], 'b', alpha=0.5)
+        plt.show()
+
+print(max(reg_norm.ravel()), min(reg_norm.ravel()))
+mz_feature = reg_norm.T
+from sklearn.preprocessing import StandardScaler as SS
+from sklearn.decomposition import PCA
+from Utilities import makeSS
+pixel_feature_std = makeSS(reg_norm) #SS().fit_transform(reg_norm)
+nPCs = 13
+pca = PCA(random_state=20210131) #, n_components=nPCs)
+pcs = pca.fit_transform(pixel_feature_std)
+loadings = pca.components_.T
+# sum of squared loadings
+SSL = np.sum(loadings**2, axis=0)
+HC_method = 'ward'
+HC_metric = 'euclidean'
+import scipy.cluster.hierarchy as sch
+import matplotlib.cm as cm
+Y = sch.linkage(pixel_feature_std, method=HC_method, metric=HC_metric)
+Z = sch.dendrogram(Y, no_plot=True)
+HC_idx = Z['leaves']
+HC_idx = np.array(HC_idx)
+thr_dist = 78
+# plot it
+plt.figure(figsize=(15, 10))
+Z = sch.dendrogram(Y, color_threshold=thr_dist)
+plt.title('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
+    HC_method, HC_metric, thr_dist))
+plt.show()
+# SaveDir = OutputFolder + '\\HC_dendrogram.png'
+# plt.savefig(SaveDir, dpi=dpi)
+# plt.close()
+
+## 2. sort features with clustering results
+mz_feature_sorted = mz_feature[HC_idx]
+
+def _2d_to_3d(array2d, Coord, regionshape):
+    nPixels, nMz = array2d.shape
+    array3d = np.zeros([regionshape[0], regionshape[1], nMz])
+    for idx, c in enumerate(Coord):
+        array3d[c[0], c[1], :] = array2d[idx, :]
+    return array3d
+
+images = _2d_to_3d(spectra, localCoor, regionshape)
+print("images.shape", images.shape)
+# plot it
+fig = plt.figure(figsize=(10, 10))
+axmatrix = fig.add_axes([0.10, 0, 0.80, 0.80])
+im = axmatrix.matshow(mz_feature_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
+fig.gca().invert_yaxis()
+plt.show()
+# colorbar
+axcolor = fig.add_axes([0.96, 0, 0.02, 0.80])
+cbar = plt.colorbar(im, cax=axcolor)
+axcolor.tick_params(labelsize=10)
+
+## 3. organize clusters with SSL
+# 1. organize ion images according to labels 2. generate average ion images
+HC_labels = sch.fcluster(Y, thr_dist, criterion='distance')
+
+# prepare label data
+elements, counts = np.unique(HC_labels, return_counts=True)
+print(elements, '\n', counts, ">>")
+# prepare imgs_std data
+# imgs_std = pixel_feature_std.T.reshape(120, NumLine, NumSpePerLine)
+# prepare accumulators
+mean_imgs = []
+total_SSLs = []
+
+for label in elements:
+    idx = np.where(HC_labels == label)[0]
+
+    # total SSL
+    total_SSL = np.sum(SSL[idx])
+    # imgs in the cluster
+    # current_cluster = imgs_std[idx]
+    # average img
+    # mean_img = np.mean(imgs_std[idx], axis=0)
+
+    # accumulate data
+    total_SSLs.append(total_SSL)
+    # mean_imgs.append(mean_img)
+
+print('Finish ion image clustering, next step: L1.2.3 sort clusters and plot')
+
 
 def _boxplot(data, labels):
     fig, ax1 = plt.subplots(figsize=(10, 6), dpi=600)

@@ -703,7 +703,7 @@ def normalize_spectrum(spectrum, normalize=None, max_region_value=None):
     elif normalize == "tic":
         specSum = sum(retSpectrum)
         if specSum > 0:
-            retSpectrum = (retSpectrum / specSum) #* len(retSpectrum)
+            retSpectrum = (retSpectrum / specSum)*len(retSpectrum)
         return retSpectrum
 
     elif normalize in ["zscore"]:
@@ -2418,7 +2418,7 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
         plt.suptitle("Processing comparison of Spec #{}".format(nS))
         plt.show()
 
-    data = copy.deepcopy(reg_norm_ss)
+    data = copy.deepcopy(reg_norm_ss[:, 0:2022])
     # +------------+
     # |    PCA     |
     # +------------+
@@ -2436,7 +2436,9 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
     print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
     df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
-
+    loadings = pca.components_.T
+    SL = loadings ** 2
+    SSL = np.sum(SL, axis=1)
     # +------------------------------+
     # |   Agglomerating Clustering   |
     # +------------------------------+
@@ -2602,12 +2604,13 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     plt.show()
 
     # if __name__ != '__main__':  #TODO: Fix PCA loadings and ion imaging
-    #     # loadings = pca.components_.T
+
+    loadings = pca.components_
     #     loadings = pd.DataFrame(pca.components_.T, columns=['PC{}'.format(x+1) for x in range(nBins)])
     #     print("loadings: ", loadings) #['PC897'])
-    #     SL = loadings**2
+    SL = loadings**2
     #     print("SL \n", SL)
-    #     SSL = np.sum(SL, axis=1)
+    SSL = np.sum(SL, axis=1)
     #     print(SSL)
     #
     #     print(loadings.shape)

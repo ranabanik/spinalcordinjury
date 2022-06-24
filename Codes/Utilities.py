@@ -342,7 +342,7 @@ class ImzmlAll(object):
             peakvar = []
             for mz in range(len(peakmzs)):
                 peakvar.append(np.std(peak3D[..., mz]))
-            topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-topN:])
+            topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-imgN:])
             # topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-imgN-3000:-3000])
         else:   # random
             topmzInd = np.round(np.linspace(0, len(peakmzs) - 1, imgN)).astype(int)

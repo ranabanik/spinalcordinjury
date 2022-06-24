@@ -15,6 +15,7 @@ from scipy.io import loadmat, savemat
 from scipy.stats import stats
 import seaborn as sns
 import pandas as pd
+from tqdm import tqdm
 import time
 from imzml import IMZMLExtract, normalize_spectrum, getionimage
 from pyimzml.ImzMLParser import _bisect_spectrum
@@ -67,103 +68,152 @@ def tictic(spectrum):
         spectrum /= ssum
     return spectrum
 
-for s in range(nPixels):
-    ticnorm = tictic(spectra[nS, :]) #normalize_spectrum(spectra[nS, :], normalize='tic')
-    reg_norm[s, :] = (ticnorm-min(ticnorm))/(max(ticnorm)-min(ticnorm))
-    if s == nS:
-        plt.hist(ticnorm)
-        plt.show()
-        plt.hist(reg_norm[s, :])
-        plt.show()
-        fig, ax = plt.subplots(dpi=100)
-        ax.plot(peakmzs, ticnorm, 'r', alpha=1.0)
-        ax0 = ax.twinx()
-        ax0.plot(peakmzs, reg_norm[s, :], 'b', alpha=0.5)
-        plt.show()
-
-print(max(reg_norm.ravel()), min(reg_norm.ravel()))
-mz_feature = reg_norm.T
-from sklearn.preprocessing import StandardScaler as SS
-from sklearn.decomposition import PCA
-from Utilities import makeSS
-pixel_feature_std = makeSS(reg_norm) #SS().fit_transform(reg_norm)
-nPCs = 13
-pca = PCA(random_state=20210131) #, n_components=nPCs)
-pcs = pca.fit_transform(pixel_feature_std)
-loadings = pca.components_.T
-# sum of squared loadings
-SSL = np.sum(loadings**2, axis=0)
-HC_method = 'ward'
-HC_metric = 'euclidean'
-import scipy.cluster.hierarchy as sch
-import matplotlib.cm as cm
-Y = sch.linkage(pixel_feature_std, method=HC_method, metric=HC_metric)
-Z = sch.dendrogram(Y, no_plot=True)
-HC_idx = Z['leaves']
-HC_idx = np.array(HC_idx)
-thr_dist = 78
-# plot it
-plt.figure(figsize=(15, 10))
-Z = sch.dendrogram(Y, color_threshold=thr_dist)
-plt.title('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
-    HC_method, HC_metric, thr_dist))
-plt.show()
-# SaveDir = OutputFolder + '\\HC_dendrogram.png'
-# plt.savefig(SaveDir, dpi=dpi)
-# plt.close()
-
-## 2. sort features with clustering results
-mz_feature_sorted = mz_feature[HC_idx]
-
 def _2d_to_3d(array2d, Coord, regionshape):
     nPixels, nMz = array2d.shape
-    array3d = np.zeros([regionshape[0], regionshape[1], nMz])
+    array3d = np.zeros([nMz, regionshape[0], regionshape[1]])
     for idx, c in enumerate(Coord):
-        array3d[c[0], c[1], :] = array2d[idx, :]
+        array3d[:, c[0], c[1]] = array2d[idx, :]
     return array3d
 
 images = _2d_to_3d(spectra, localCoor, regionshape)
 print("images.shape", images.shape)
-# plot it
-fig = plt.figure(figsize=(10, 10))
-axmatrix = fig.add_axes([0.10, 0, 0.80, 0.80])
-im = axmatrix.matshow(mz_feature_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
-fig.gca().invert_yaxis()
+images = (images-images.min())/(images.max()-images.min())
+
+print(np.max(images.ravel()), np.min(images.ravel()))
+from sklearn.preprocessing import StandardScaler as SS
+from Utilities import makeSS
+
+# plt.imshow(images[..., 140])
+# plt.colorbar()
+# plt.show()
+# # plot it
+
+# images = images.reshape(3075, 91, 60)
+# print("images.shape", images.shape)
+plt.imshow(images[140, ...])
+plt.colorbar()
 plt.show()
-# colorbar
-axcolor = fig.add_axes([0.96, 0, 0.02, 0.80])
-cbar = plt.colorbar(im, cax=axcolor)
-axcolor.tick_params(labelsize=10)
+image_shape = images[0, ...].shape
+print("image_shape", image_shape)
+images_flat = images.reshape((len(images), -1))
+print(images_flat.shape)
+# images_flat = SS().fit_transform(images_flat) #makeSS(reg_norm)  #
+print(np.max(images_flat.ravel()), np.min(images_flat.ravel()), np.std(images_flat), np.mean(images_flat))
+from sklearn.decomposition import PCA
+from matplotlib.colors import LinearSegmentedColormap
+pca = PCA(n_components=100, whiten=True, random_state=20210131)
+pcs = pca.fit_transform(images_flat)
+print(pcs.shape)
+colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
+n_bin = 100
+mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
+fig, axes = plt.subplots(3, 5, figsize=(15, 12), subplot_kw={'xticks': (), 'yticks': ()})
+for i, (component, ax) in enumerate(tqdm(zip(pca.components_, axes.ravel()))):
+    print(i)
+    im = ax.imshow(component.reshape(image_shape),
+              cmap='simple_list')
+    ax.set_title("{}. component".format((i + 1)))
+fig.subplots_adjust(right=0.8)
+cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+fig.colorbar(im, cax=cbar_ax)
+plt.show()
+if __name__ == '__main__':
+    # for s in range(nPixels):
+    #     ticnorm = tictic(spectra[nS, :]) #normalize_spectrum(spectra[nS, :], normalize='tic')
+    #     reg_norm[s, :] = (ticnorm-min(ticnorm))/(max(ticnorm)-min(ticnorm))
+    #     if s == nS:
+    #         plt.hist(ticnorm)
+    #         plt.show()
+    #         plt.hist(reg_norm[s, :])
+    #         plt.show()
+    #         fig, ax = plt.subplots(dpi=100)
+    #         ax.plot(peakmzs, ticnorm, 'r', alpha=1.0)
+    #         ax0 = ax.twinx()
+    #         ax0.plot(peakmzs, reg_norm[s, :], 'b', alpha=0.5)
+    #         plt.show()
+    #
+    # print(max(reg_norm.ravel()), min(reg_norm.ravel()))
+    mz_feature = images_flat.T
+    # from sklearn.preprocessing import StandardScaler as SS
+    #
+    # from Utilities import makeSS
+    # pixel_feature_std = makeSS(reg_norm) #SS().fit_transform(reg_norm)
+    # nPCs = 13
+    # pca = PCA(random_state=20210131) #, n_components=nPCs)
+    # pcs = pca.fit_transform(pixel_feature_std)
+    loadings = pca.components_.T
+    # sum of squared loadings
+    SSL = np.sum(loadings**2, axis=0)
+    HC_method = 'ward'
+    HC_metric = 'euclidean'
+    import scipy.cluster.hierarchy as sch
+    import matplotlib.cm as cm
+    Y = sch.linkage(images_flat, method=HC_method, metric=HC_metric)
+    Z = sch.dendrogram(Y, no_plot=True)
+    HC_idx = Z['leaves']
+    HC_idx = np.array(HC_idx)
+    thr_dist = 78
+    # plot it
+    plt.figure(figsize=(15, 10))
+    Z = sch.dendrogram(Y, color_threshold=thr_dist)
+    plt.title('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
+        HC_method, HC_metric, thr_dist))
+    plt.show()
+    # SaveDir = OutputFolder + '\\HC_dendrogram.png'
+    # plt.savefig(SaveDir, dpi=dpi)
+    # plt.close()
 
-## 3. organize clusters with SSL
-# 1. organize ion images according to labels 2. generate average ion images
-HC_labels = sch.fcluster(Y, thr_dist, criterion='distance')
+    ## 2. sort features with clustering results
+    mz_feature_sorted = mz_feature[HC_idx]
 
-# prepare label data
-elements, counts = np.unique(HC_labels, return_counts=True)
-print(elements, '\n', counts, ">>")
-# prepare imgs_std data
-# imgs_std = pixel_feature_std.T.reshape(120, NumLine, NumSpePerLine)
-# prepare accumulators
-mean_imgs = []
-total_SSLs = []
+    def _2d_to_3d(array2d, Coord, regionshape):
+        nPixels, nMz = array2d.shape
+        array3d = np.zeros([regionshape[0], regionshape[1], nMz])
+        for idx, c in enumerate(Coord):
+            array3d[c[0], c[1], :] = array2d[idx, :]
+        return array3d
 
-for label in elements:
-    idx = np.where(HC_labels == label)[0]
+    images = _2d_to_3d(spectra, localCoor, regionshape)
+    print("images.shape", images.shape)
+    # plot it
+    fig = plt.figure(figsize=(10, 10))
+    axmatrix = fig.add_axes([0.10, 0, 0.80, 0.80])
+    im = axmatrix.matshow(mz_feature_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
+    fig.gca().invert_yaxis()
+    plt.show()
+    # colorbar
+    axcolor = fig.add_axes([0.96, 0, 0.02, 0.80])
+    cbar = plt.colorbar(im, cax=axcolor)
+    axcolor.tick_params(labelsize=10)
 
-    # total SSL
-    total_SSL = np.sum(SSL[idx])
-    # imgs in the cluster
-    # current_cluster = imgs_std[idx]
-    # average img
-    # mean_img = np.mean(imgs_std[idx], axis=0)
+    ## 3. organize clusters with SSL
+    # 1. organize ion images according to labels 2. generate average ion images
+    HC_labels = sch.fcluster(Y, thr_dist, criterion='distance')
 
-    # accumulate data
-    total_SSLs.append(total_SSL)
-    # mean_imgs.append(mean_img)
+    # prepare label data
+    elements, counts = np.unique(HC_labels, return_counts=True)
+    print(elements, '\n', counts, ">>")
+    # prepare imgs_std data
+    # imgs_std = pixel_feature_std.T.reshape(120, NumLine, NumSpePerLine)
+    # prepare accumulators
+    mean_imgs = []
+    total_SSLs = []
 
-print('Finish ion image clustering, next step: L1.2.3 sort clusters and plot')
+    for label in elements:
+        idx = np.where(HC_labels == label)[0]
 
+        # total SSL
+        total_SSL = np.sum(SSL[idx])
+        # imgs in the cluster
+        # current_cluster = imgs_std[idx]
+        # average img
+        # mean_img = np.mean(imgs_std[idx], axis=0)
+
+        # accumulate data
+        total_SSLs.append(total_SSL)
+        # mean_imgs.append(mean_img)
+
+    print('Finish ion image clustering, next step: L1.2.3 sort clusters and plot')
 
 def _boxplot(data, labels):
     fig, ax1 = plt.subplots(figsize=(10, 6), dpi=600)
@@ -205,7 +255,7 @@ def _boxplot(data, labels):
 # +--------------------------------------+
 # |   resampling > peak-picking image    |
 # +--------------------------------------+
-if __name__ != '__main__':
+if __name__ == '__main__':
     ImzObj = ImzmlAll(mspathList[0])
     regID = 1
     tol = 0.02

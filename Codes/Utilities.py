@@ -2358,6 +2358,9 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     performs ML on resampled and peak picked spectra based on tolerance
     without interpolation...
     """
+    colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
+    n_bin = 100
+    mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
     plot_spec = True
     plot_pca = True
     plot_umap = True
@@ -2393,37 +2396,47 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     # +------------------------------+
     # |   normalize, standardize     |
     # +------------------------------+
+    spectra = np.array(spectra)     # nPixel x nMz
+    spec_norm = (spectra - spectra.min()) / (spectra.max() - spectra.min())
+    def _2d_to_3d(array2d, Coord, regionshape):
+        nPixels, nMz = array2d.shape
+        array3d = np.zeros([nMz, regionshape[0], regionshape[1]])
+        for idx, c in enumerate(Coord):
+            array3d[:, c[0], c[1]] = array2d[idx, :]
+        return array3d
+    images = _2d_to_3d(spec_norm, localCoor, regionshape)   #3D ->  nMz x nPixelx x nPixely
+    mz_features = images.reshape((len(images), -1))
+    mz_features = SS().fit_transform(mz_features)
     # _, reg_smooth_, _ = bestWvltForRegion(regSpec, bestWvlt='db8', smoothed_array=True, plot_fig=False)
-    reg_norm = np.zeros_like(spectra)
-    for s in range(nSpecs):
-        reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='tic')  # max_intensity_spectrum   #reg_smooth_
-    reg_norm_ss = makeSS(reg_norm).astype(np.float64)
+    # reg_norm = np.zeros_like(spectra)
+    # for s in range(nSpecs):
+        # reg_norm[s, :] = normalize_spectrum(spectra[s, :], normalize='tic')  # max_intensity_spectrum   #reg_smooth_
+    # reg_norm_ss = makeSS(reg_norm).astype(np.float64)
     # reg_norm_ss = SS(with_mean=True, with_std=True).fit_transform(reg_norm)
     # +----------------+
     # |  plot spectra  |
     # +----------------+
-    if plot_spec:
-        nS = np.random.randint(nSpecs)
-        fig, ax = plt.subplots(4, 1, figsize=(16, 10), dpi=200)
-        ax[0].plot(spectra[nS, :])
-        ax[0].set_title("raw spectrum")
-        ax[1].plot(reg_norm[nS, :])
-        ax[1].set_title("max norm")
-        ax[2].plot(reg_norm_ss[nS, :])
-        ax[2].set_title("standardized")
-        ax[3].plot(np.mean(spectra, axis=0))
-        ax[3].set_title("mean spectra(region {})")
-        # ax[4].plot(reg_smooth_[nS, :])
-        # ax[4].set_title("Smoothed...")
-        plt.suptitle("Processing comparison of Spec #{}".format(nS))
-        plt.show()
-
-    data = copy.deepcopy(reg_norm_ss[:, 0:2022])
+    # if plot_spec:
+    #     nS = np.random.randint(nSpecs)
+    #     fig, ax = plt.subplots(4, 1, figsize=(16, 10), dpi=200)
+    #     ax[0].plot(spectra[nS, :])
+    #     ax[0].set_title("raw spectrum")
+    #     ax[1].plot(reg_norm[nS, :])
+    #     ax[1].set_title("max norm")
+    #     ax[2].plot(reg_norm_ss[nS, :])
+    #     ax[2].set_title("standardized")
+    #     ax[3].plot(np.mean(spectra, axis=0))
+    #     ax[3].set_title("mean spectra(region {})")
+    #     # ax[4].plot(reg_smooth_[nS, :])
+    #     # ax[4].set_title("Smoothed...")
+    #     plt.suptitle("Processing comparison of Spec #{}".format(nS))
+    #     plt.show()
+    pixel_features = copy.deepcopy(mz_features.T)    # nPixel x nMz
     # +------------+
     # |    PCA     |
     # +------------+
-    pca = PCA(random_state=RandomState)  # pca object
-    pcs = pca.fit_transform(data)  # (4587, 2000)
+    pca = PCA(random_state=RandomState)  # pca object n_components=100,
+    pcs = pca.fit_transform(pixel_features)  # (4587, 2000)
     # pcs=pca.fit_transform(oldLipid_mm_norm)
     pca_range = np.arange(1, pca.n_components_, 1)
     print(">> PCA: number of components #{}".format(pca.n_components_))
@@ -2437,26 +2450,26 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
     df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
     loadings = pca.components_.T
-    SL = loadings ** 2
-    SSL = np.sum(SL, axis=1)
-    # +------------------------------+
-    # |   Agglomerating Clustering   |
-    # +------------------------------+
-    nCl = 4
-    agg = AgglomerativeClustering(n_clusters=nCl)
-    assignment = agg.fit_predict(pcs)  # on pca
-    mglearn.discrete_scatter(np.array([i[0] for i in localCoor]),
-                             np.array([i[1] for i in localCoor]), assignment, labels=np.unique(assignment))
-    plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
-    plt.title("Agglomerative Clustering")
+    SSL = np.sum(loadings ** 2, axis=1)
+    n_cols = 5
+    if nPCs % n_cols == 0:
+        n_rows = int(nPCs / n_cols)
+    else:
+        n_rows = nPCs // n_cols + 1
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 12), subplot_kw={'xticks': (), 'yticks': ()})
+    for i, (colname, ax) in enumerate(tqdm(zip(df_pca, axes.ravel()))):
+        # print(i)
+        component = df_pca[colname].values
+        im = ax.imshow(component.reshape(regionshape), cmap='simple_list')
+        ax.set_title("{}. component".format((i + 1)))
+    fig.subplots_adjust(right=0.8)
+    # divider = make_axes_locatable(axes)
+    # cax = divider.append_axes('right', size='5%', pad=0.05)
+    # fig.colorbar(im, cax=cax, ax=ax)
+    # cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+    # fig.colorbar(images[0], ax=axs, orientation='vertical', fraction=.2)
+    fig.colorbar(im, ax=axes, location='right', shrink=0.6)
     plt.show()
-    seg = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
-    for idx, coor in enumerate(localCoor):
-        seg[coor[0], coor[1]] = assignment[idx] + 1
-    plt.imshow(seg)
-    plt.title("Agglomerative segmentation")
-    plt.show()
-
     if plot_pca:
         MaxPCs = nPCs + 5
         fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
@@ -2491,72 +2504,89 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
         plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
         plt.show()
 
-        plt.figure(figsize=(12, 10), dpi=200)
-        # plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
-        # plt.scatter(df_pca.PC_1, df_pca.PC_2, c=assignment, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
-        mglearn.discrete_scatter(df_pca.PC_1, df_pca.PC_2, assignment, alpha=0.5) #, labels=np.unique(assignment))
-        plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
-        plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
-        plt.tick_params(size=10, color='black')
-        # tick and axis theme
-        plt.xticks(fontsize=20)
-        plt.yticks(fontsize=20)
-        plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
-        ax = plt.gca()  # Get the current Axes instance
-        for axis in ['top', 'bottom', 'left', 'right']:
-            ax.spines[axis].set_linewidth(2)
-        ax.tick_params(width=2)
-        plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
-        plt.show()
-
-        colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
-        n_bin = 100
-        mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
-        Nc = 2
+        # Nc = 2
         # MaxPCs = nPCs# + 1
-        if MaxPCs % Nc != 0:
-            Nr = int((nPCs + 1) / Nc)
-        else:
-            Nr = int(nPCs/Nc)
-         #MaxPCs
-        heights = [regionshape[1] for r in range(Nr)]
-        widths = [regionshape[0] for r in range(Nc)]
-        fig_width = 5.  # inches
-        fig_height = fig_width * sum(heights) / sum(widths)
-        fig, axs = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600, constrained_layout=True,
-                                gridspec_kw={'height_ratios': heights})
-        images = []
-        pc = 0
-        image = copy.deepcopy(pcs)
-        from sklearn.preprocessing import minmax_scale
-        image = minmax_scale(image.ravel(), feature_range=(10, 255)).reshape(image.shape)
-        for r in range(Nr):
-            for c in range(Nc):
-                # Generate data with a range that varies from one plot to the next.
-                arrayPC = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
-                for idx, coor in enumerate(localCoor):
-                    arrayPC[coor[0], coor[1]] = image[idx, pc]
-                images.append(axs[r, c].imshow(arrayPC.T, origin='lower',
-                                                   cmap='simple_list'))  # 'RdBu_r')) #
-                axs[r, c].label_outer()
-                axs[r, c].set_axis_off()
-                axs[r, c].set_title('PC{}'.format(pc + 1), fontsize=10, pad=0.25)
-                fig.subplots_adjust(top=0.95, bottom=0.02, left=0,
-                                    right=1, hspace=0.14, wspace=0)
-                pc += 1
+        # if MaxPCs % Nc != 0:
+        #     Nr = int((nPCs + 1) / Nc)
+        # else:
+        #     Nr = int(nPCs/Nc)
+        #  #MaxPCs
+        # heights = [regionshape[1] for r in range(Nr)]
+        # widths = [regionshape[0] for r in range(Nc)]
+        # fig_width = 5.  # inches
+        # fig_height = fig_width * sum(heights) / sum(widths)
+        # fig, axs = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600, constrained_layout=True,
+        #                         gridspec_kw={'height_ratios': heights})
+        # images = []
+        # pc = 0
+        # image = copy.deepcopy(pcs)
+        # from sklearn.preprocessing import minmax_scale
+        # image = minmax_scale(image.ravel(), feature_range=(10, 255)).reshape(image.shape)
+        # for r in range(Nr):
+        #     for c in range(Nc):
+        #         # Generate data with a range that varies from one plot to the next.
+        #         arrayPC = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+        #         for idx, coor in enumerate(localCoor):
+        #             arrayPC[coor[0], coor[1]] = image[idx, pc]
+        #         images.append(axs[r, c].imshow(arrayPC.T, origin='lower',
+        #                                            cmap='simple_list'))  # 'RdBu_r')) #
+        #         axs[r, c].label_outer()
+        #         axs[r, c].set_axis_off()
+        #         axs[r, c].set_title('PC{}'.format(pc + 1), fontsize=10, pad=0.25)
+        #         fig.subplots_adjust(top=0.95, bottom=0.02, left=0,
+        #                             right=1, hspace=0.14, wspace=0)
+        #         pc += 1
+        #
+        # def update(changed_image):
+        #     for im in images:
+        #         if (changed_image.get_cmap() != im.get_cmap()
+        #                 or changed_image.get_clim() != im.get_clim()):
+        #             im.set_cmap(changed_image.get_cmap())
+        #             im.set_clim(changed_image.get_clim())
+        #             im.set_tight_layout('tight')
+        #
+        # for im in images:
+        #     im.callbacks.connect('changed', update)
+        # fig.suptitle("PC images {}:reg {}".format(filename, regID))
+        # plt.show()
 
-        def update(changed_image):
-            for im in images:
-                if (changed_image.get_cmap() != im.get_cmap()
-                        or changed_image.get_clim() != im.get_clim()):
-                    im.set_cmap(changed_image.get_cmap())
-                    im.set_clim(changed_image.get_clim())
-                    im.set_tight_layout('tight')
+    # +------------------------------+
+    # |   Agglomerating Clustering   |
+    # +------------------------------+
+    nCl = 4
+    agg = AgglomerativeClustering(n_clusters=nCl)
+    assignment = agg.fit_predict(df_pca.values)  # on pca
+    # mglearn.discrete_scatter(np.array([i[0] for i in localCoor]),
+    #                          np.array([i[1] for i in localCoor]), assignment, labels=np.unique(assignment))
+    # plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    # plt.title("Agglomerative Clustering")
+    # plt.show()
+    # seg = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+    # for idx, coor in enumerate(localCoor):
+    #     seg[coor[0], coor[1]] = assignment[idx] + 1
+    # plt.imshow(seg)
+    plt.imshow(assignment.reshape(regionshape), cmap='simple_list')
+    plt.title("Agglomerative segmentation")
+    plt.colorbar()
+    plt.show()
 
-        for im in images:
-            im.callbacks.connect('changed', update)
-        fig.suptitle("PC images {}:reg {}".format(filename, regID))
-        plt.show()
+    plt.figure(figsize=(12, 10), dpi=200)
+    # plt.scatter(df_pca.PC_1, df_pca.PC_2, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+    # plt.scatter(df_pca.PC_1, df_pca.PC_2, c=assignment, facecolors='None', edgecolors=cm.tab20(0), alpha=0.5)
+    mglearn.discrete_scatter(df_pca.PC_1, df_pca.PC_2, assignment, alpha=0.5)  # , labels=np.unique(assignment))
+    plt.xlabel('PC1 ({}%)'.format(round(evr[0] * 100, 2)), fontsize=30)
+    plt.ylabel('PC2 ({}%)'.format(round(evr[1] * 100, 2)), fontsize=30)
+    plt.tick_params(size=10, color='black')
+    # tick and axis theme
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.legend(['tissue {}'.format(c + 1) for c in range(nCl)], loc='upper right')
+    ax = plt.gca()  # Get the current Axes instance
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(2)
+    ax.tick_params(width=2)
+    plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+    plt.show()
 
     # +-------------------+
     # |   HC_clustering   |
@@ -2566,7 +2596,7 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     fig = plt.figure(figsize=(15, 15), dpi=300)
     # plot dendogram
     axdendro = fig.add_axes([0.09, 0.1, 0.2, 0.8])
-    Y = sch.linkage(df_pca.values, method=HC_method, metric=HC_metric)
+    Y = sch.linkage(mz_features, method=HC_method, metric=HC_metric)
     thre_dist = 375  # TODO: how to fix it?
     Z = sch.dendrogram(Y, color_threshold=thre_dist, orientation='left')
     fig.gca().invert_yaxis()
@@ -2602,37 +2632,6 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     fig.colorbar(sarrayIm)
     ax.set_title('reg{}: HC Clustering'.format(regID), fontsize=15, loc='center')
     plt.show()
-
-    # if __name__ != '__main__':  #TODO: Fix PCA loadings and ion imaging
-
-    loadings = pca.components_
-    #     loadings = pd.DataFrame(pca.components_.T, columns=['PC{}'.format(x+1) for x in range(nBins)])
-    #     print("loadings: ", loadings) #['PC897'])
-    SL = loadings**2
-    #     print("SL \n", SL)
-    SSL = np.sum(SL, axis=1)
-    #     print(SSL)
-    #
-    #     print(loadings.shape)
-    #     SSL = np.sum(loadings ** 2, axis=1)
-    #     print(SSL.shape)
-    #     mean_imgs = []
-    #     total_SSLs = []
-            # # img_std =
-            # for label in elements:
-            #     idx = np.where(HC_labels == label)[0]
-            #
-            #     # total SSL
-            #     total_SSL = np.sum(SSL[idx])
-            #     print(total_SSL)
-            #     # imgs in the cluster
-            #     current_cluster = imgs_std[idx]
-            #     # average img
-            #     mean_img = np.mean(imgs_std[idx], axis=0)
-            #
-            #     # accumulate data
-            #     total_SSLs.append(total_SSL)
-            #     mean_imgs.append(mean_img)
 
     # +------------------+
     # |      UMAP        |
@@ -2686,7 +2685,7 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
                    unique=False
                    # default False, Controls if the rows of your data should be uniqued before being embedded.
                    )
-    data_umap = reducer.fit_transform(data) #df_pca.values)  # on pca
+    data_umap = reducer.fit_transform(df_pca.values) #df_pca.values)  # on pca
     for i in range(reducer.n_components):
         df_pca.insert(df_pca.shape[1], column='umap_{}'.format(i + 1), value=data_umap[:, i])
     df_pca_umap = copy.deepcopy(df_pca)
@@ -2765,15 +2764,10 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     # +--------------------------------------+
     # |   Segmentation on PCA+UMAP+HDBSCAN   |
     # +--------------------------------------+
-    sarray = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
-    for idx, coor in enumerate(localCoor):
-        sarray[coor[0], coor[1]] = labels[idx] + 1
-    try:
-        sarray = nnPixelCorrect(sarray, 20, 3)  # noisy pixel is labeled as 19 by hdbscan
-    except:
-        pass
+    sarray = labels.reshape(regionshape) #np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+    sarray = nnPixelCorrect(sarray, 19, 3)
     fig, ax = plt.subplots(figsize=(6, 8))
-    sarrayIm = ax.imshow(sarray)
+    sarrayIm = ax.imshow(sarray, cmap='simple_list')
     fig.colorbar(sarrayIm)
     ax.set_title('reg{}: HDBSCAN labeling'.format(regID), fontsize=15, loc='center')
     plt.show()

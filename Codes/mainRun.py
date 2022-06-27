@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Utilities import msmlfunc5, matchSpecLabel2, ImzmlAll, rawVSprocessed
+from Codes.Utilities import msmlfunc5, matchSpecLabel2, ImzmlAll, rawVSprocessed
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -17,7 +17,7 @@ import seaborn as sns
 import pandas as pd
 from tqdm import tqdm
 import time
-from imzml import IMZMLExtract, normalize_spectrum, getionimage
+from Codes.imzml import IMZMLExtract, normalize_spectrum, getionimage
 from pyimzml.ImzMLParser import _bisect_spectrum
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy import interpolate
@@ -26,98 +26,20 @@ from ms_peak_picker import pick_peaks
 import h5py
 
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
-posLip = r'/media/banikr/DATA/MALDI/demo_banikr_'
-posLipNew = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW'
+posLip = r'C:\Data\210427-Chen_poslip' #'/media/banikr/DATA/MALDI/demo_banikr_'
+posLipNew = r'C:\Data\220211_reyzerml_IMC_380_plate4A_poslipids'  #'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW'
 posLipNew2 = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate2A_poslipid-NEW'
 posLipNew3 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate3A_poslipids'
 posLipNew4 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate4A_poslipids'
 
-pathList = [posLip, posLipNew, posLipNew2, posLipNew3, posLipNew4]
+pathList = [posLip, posLipNew] #, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 # print(mspathList)
 
 # ImzObj = ImzmlAll(mspathList[0])
-# ImzObj.resample_region(regID=1, tol=0.02, savedata=True)
-# ImzObj.get_ion_images(regID=2, peak=True) #, array2D=r2d, mzrange=mzrange)
-# for r in [2, 3, 4, 5]:
-# msmlfunc5(mspathList[0], 2, 0.99, exprun='upsampled_clustering', save_rseg=False)
+msmlfunc5(mspathList[0], regID = 1, threshold=0.99, exprun='pca_new')
 
-# +-----------------------+
-# |      multivariate     |
-# +-----------------------+
-dirname = os.path.dirname(mspathList[0])
-basename = os.path.basename(mspathList[0])
-filename, ext = os.path.splitext(basename)
-regID = 2
-exprun='upsampled_clustering'
-regDir = os.path.join(dirname, 'reg_{}'.format(regID))
-regname = os.path.join(regDir, '{}_reg_{}_{}.h5'.format(filename, regID, exprun))
-f = h5py.File(regname, 'r')
-spectra = np.array(f['spectra'])
-localCoor = list(f['coordinates'])
-regionshape = list(f['regionshape'])
-peakmzs = list(f['peakmzs'])
-print(spectra.shape, '\n', localCoor, '\n', regionshape, '\n', peakmzs)
-nPixels, nBins = spectra.shape
-reg_norm = np.zeros_like(spectra)
-nS = 108#np.random.randint(nPixels)
-
-def tictic(spectrum):
-    ssum = sum(spectrum)
-    if ssum > 0:
-        spectrum /= ssum
-    return spectrum
-
-def _2d_to_3d(array2d, Coord, regionshape):
-    nPixels, nMz = array2d.shape
-    array3d = np.zeros([nMz, regionshape[0], regionshape[1]])
-    for idx, c in enumerate(Coord):
-        array3d[:, c[0], c[1]] = array2d[idx, :]
-    return array3d
-
-images = _2d_to_3d(spectra, localCoor, regionshape)
-print("images.shape", images.shape)
-images = (images-images.min())/(images.max()-images.min())
-
-print(np.max(images.ravel()), np.min(images.ravel()))
-from sklearn.preprocessing import StandardScaler as SS
-from Utilities import makeSS
-
-# plt.imshow(images[..., 140])
-# plt.colorbar()
-# plt.show()
-# # plot it
-
-# images = images.reshape(3075, 91, 60)
-# print("images.shape", images.shape)
-plt.imshow(images[140, ...])
-plt.colorbar()
-plt.show()
-image_shape = images[0, ...].shape
-print("image_shape", image_shape)
-images_flat = images.reshape((len(images), -1))
-print(images_flat.shape)
-# images_flat = SS().fit_transform(images_flat) #makeSS(reg_norm)  #
-print(np.max(images_flat.ravel()), np.min(images_flat.ravel()), np.std(images_flat), np.mean(images_flat))
-from sklearn.decomposition import PCA
-from matplotlib.colors import LinearSegmentedColormap
-pca = PCA(n_components=100, whiten=True, random_state=20210131)
-pcs = pca.fit_transform(images_flat)
-print(pcs.shape)
-colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
-n_bin = 100
-mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
-fig, axes = plt.subplots(3, 5, figsize=(15, 12), subplot_kw={'xticks': (), 'yticks': ()})
-for i, (component, ax) in enumerate(tqdm(zip(pca.components_, axes.ravel()))):
-    print(i)
-    im = ax.imshow(component.reshape(image_shape),
-              cmap='simple_list')
-    ax.set_title("{}. component".format((i + 1)))
-fig.subplots_adjust(right=0.8)
-cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
-fig.colorbar(im, cax=cbar_ax)
-plt.show()
-if __name__ == '__main__':
+if __name__ != '__main__':
     # for s in range(nPixels):
     #     ticnorm = tictic(spectra[nS, :]) #normalize_spectrum(spectra[nS, :], normalize='tic')
     #     reg_norm[s, :] = (ticnorm-min(ticnorm))/(max(ticnorm)-min(ticnorm))
@@ -255,7 +177,7 @@ def _boxplot(data, labels):
 # +--------------------------------------+
 # |   resampling > peak-picking image    |
 # +--------------------------------------+
-if __name__ == '__main__':
+if __name__ != '__main__':
     ImzObj = ImzmlAll(mspathList[0])
     regID = 1
     tol = 0.02

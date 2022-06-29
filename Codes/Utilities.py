@@ -1233,7 +1233,7 @@ def msmlfunc2(dirname, regArr, regSpec, regCoor, regID, threshold, exprun_name=N
         ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
         ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
         ax.set_xlabel('Principal component number', fontsize=30)
-        ax.set_ylabel('Percentage of \nvariance explained', fontsize=30)
+        ax.set_ylabel('Percentage of \n variance explained', fontsize=30)
         ax.set_ylim([-0.5, 100])
         ax.set_xlim([-0.5, MaxPCs])
         ax.grid("on")
@@ -2503,7 +2503,6 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
 
         plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
         plt.show()
-
         # Nc = 2
         # MaxPCs = nPCs# + 1
         # if MaxPCs % Nc != 0:
@@ -2549,7 +2548,6 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
         #     im.callbacks.connect('changed', update)
         # fig.suptitle("PC images {}:reg {}".format(filename, regID))
         # plt.show()
-
     # +------------------------------+
     # |   Agglomerating Clustering   |
     # +------------------------------+
@@ -2587,26 +2585,32 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     ax.tick_params(width=2)
     plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
     plt.show()
-
     # +-------------------+
     # |   HC_clustering   |
     # +-------------------+
+    # pca = PCA(random_state=RandomState, n_components=nPCs)
+    # pcs = pca.fit_transform(pixel_features)
+    # HC_method = 'ward'
+    # HC_metric = 'euclidean'
+    # Y = sch.linkage(mz_features, method=HC_method, metric=HC_metric)
+    # Z = sch.dendrogram(Y, orientation='left') #, color_threshold=thre_dist
+    # if __name__ == '__main__':
     HC_method = 'ward'
     HC_metric = 'euclidean'
-    fig = plt.figure(figsize=(15, 15), dpi=300)
     # plot dendogram
+    fig = plt.figure(figsize=(15, 15), dpi=300)
     axdendro = fig.add_axes([0.09, 0.1, 0.2, 0.8])
     Y = sch.linkage(mz_features, method=HC_method, metric=HC_metric)
-    thre_dist = 375  # TODO: how to fix it?
-    Z = sch.dendrogram(Y, color_threshold=thre_dist, orientation='left')
+    thre_dist = 78  # TODO: how to fix it?
+    Z = sch.dendrogram(Y, color_threshold=thre_dist, orientation='left') #
     fig.gca().invert_yaxis()
     axdendro.set_xticks([])
     axdendro.set_yticks([])
     # plot matrix/feature(sorted)
     axmatrix = fig.add_axes([0.3, 0.1, 0.6, 0.8]) #left, bottom, width, height
     HC_idx = np.array(Z['leaves'])
-    features_modi_sorted = df_pca.values[HC_idx]
-    im = axmatrix.matshow(features_modi_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
+    mz_features_sorted = mz_features[HC_idx] #mz_features[HC_idx] #df_pca.values[HC_idx]
+    im = axmatrix.matshow(mz_features_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
     fig.gca().invert_yaxis()
     axmatrix.set_xticks([])
     axmatrix.set_yticks([])
@@ -2623,16 +2627,49 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     # # prepare label data
     elements, counts = np.unique(HC_labels, return_counts=True)
     print(elements, counts)
-    sarray1 = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
-    for idx, coor in enumerate(localCoor):
-        sarray1[coor[0], coor[1]] = HC_labels[idx]
+    # sarray1 = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+    # for idx, coor in enumerate(localCoor):
+    #     sarray1[coor[0], coor[1]] = HC_labels[idx]
+    #
+    # fig, ax = plt.subplots(figsize=(6, 8))
+    # sarrayIm = ax.imshow(sarray1)
+    # fig.colorbar(sarrayIm)
+    # ax.set_title('reg{}: HC Clustering'.format(regID), fontsize=15, loc='center')
+    # plt.show()
 
-    fig, ax = plt.subplots(figsize=(6, 8))
-    sarrayIm = ax.imshow(sarray1)
-    fig.colorbar(sarrayIm)
-    ax.set_title('reg{}: HC Clustering'.format(regID), fontsize=15, loc='center')
+    # +----------------+
+    # |   clustering   |
+    # +----------------+
+    img_std = pixel_features.T.reshape((pixel_features.shape[1], regionshape[0], regionshape[1]))
+    mean_imgs = []
+    total_SSLs = []
+    for label in elements:
+        idx = np.where(HC_labels == label)[0]
+        total_SSL = np.sum(SSL[idx])
+        current_cluster = img_std[idx]
+        mean_img = np.mean(current_cluster, axis=0)
+        total_SSLs.append(total_SSL)
+        mean_imgs.append(mean_img)
+
+    rank_idx = np.argsort(total_SSLs)
+    # plot together
+    fig, axes = plt.subplots(4, 13, figsize=(15, 12), subplot_kw={'xticks': (), 'yticks': ()})
+    for i, ax in tqdm(zip(range(elements.shape[0]), axes.ravel())):
+        # print(i)
+        idx = rank_idx[i]
+        total_SSL = total_SSLs[idx]
+        count = counts[idx]
+        mean_img = mean_imgs[idx]
+        im = ax.imshow(mean_img, cmap='simple_list')
+        ax.set_title("Rank #{} # of images: {}".format(i, count))  # total_SSL: {} , round(total_SSL, 4)
+    fig.subplots_adjust(right=0.8)
+    # divider = make_axes_locatable(axes)
+    # cax = divider.append_axes('right', size='5%', pad=0.05)
+    # fig.colorbar(im, cax=cax, ax=ax)
+    # cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+    # fig.colorbar(images[0], ax=axs, orientation='vertical', fraction=.2)
+    # fig.colorbar(im, ax=axes, location='right', shrink=0.6)
     plt.show()
-
     # +------------------+
     # |      UMAP        |
     # +------------------+
@@ -2685,10 +2722,10 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
                    unique=False
                    # default False, Controls if the rows of your data should be uniqued before being embedded.
                    )
-    data_umap = reducer.fit_transform(df_pca.values) #df_pca.values)  # on pca
-    for i in range(reducer.n_components):
-        df_pca.insert(df_pca.shape[1], column='umap_{}'.format(i + 1), value=data_umap[:, i])
+    data_umap = reducer.fit_transform(df_pca.values) # .iloc[:, 0:nPCs] or df_pca.values)  # on pca
     df_pca_umap = copy.deepcopy(df_pca)
+    for i in range(reducer.n_components):
+        df_pca_umap.insert(df_pca_umap.shape[1], column='umap_{}'.format(i + 1), value=data_umap[:, i])
     # +---------------+
     # |   UMAP plot   |
     # +---------------+
@@ -2758,22 +2795,22 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     plt.suptitle("n_neighbors={}, Cosine metric".format(u_neigh))
     # plt.show()
 
-    df_pca_umap.insert(df_pca_umap.shape[1], column='hdbscan_labels', value=labels)
     df_pca_umap_hdbscan = copy.deepcopy(df_pca_umap)
+    df_pca_umap_hdbscan.insert(df_pca_umap_hdbscan.shape[1], column='hdbscan_labels', value=labels)
 
     # +--------------------------------------+
     # |   Segmentation on PCA+UMAP+HDBSCAN   |
     # +--------------------------------------+
-    sarray = labels.reshape(regionshape) #np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
-    sarray = nnPixelCorrect(sarray, 19, 3)
+    imdata = labels.reshape(regionshape) #np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+    imdata = nnPixelCorrect(imdata, 19, 3)
     fig, ax = plt.subplots(figsize=(6, 8))
-    sarrayIm = ax.imshow(sarray, cmap='simple_list')
-    fig.colorbar(sarrayIm)
+    im = ax.imshow(imdata, cmap='simple_list')
+    fig.colorbar(im)
     ax.set_title('reg{}: HDBSCAN labeling'.format(regID), fontsize=15, loc='center')
     plt.show()
     if save_rseg:
         namepy = os.path.join(regDir, '{}_hdbscan-label.npy'.format(exprun))
-        np.save(namepy, sarray)
+        np.save(namepy, imdata)
 
     # +-----------------+
     # |       GMM       |
@@ -2782,12 +2819,13 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     span = 5
     n_component = _generate_nComponentList(n_components, span)
     repeat = 2
-    print("Consider for gmm >>", df_pca_umap.columns[0:nPCs+reducer.n_components])
+    print("Consider for gmm >>", df_pca.columns[0:nPCs])
     for i in range(repeat):  # may repeat several times
         for j in range(n_component.shape[0]):  # ensemble with different n_component value
             StaTime = time.time()
             gmm = GMM(n_components=n_component[j], max_iter=5000)  # max_iter does matter, no random seed assigned
-            labels = gmm.fit_predict(df_pca_umap.iloc[:, 0:nPCs+reducer.n_components])     #todo data_umap
+            # labels = gmm.fit_predict(df_pca_umap.iloc[:, 0:nPCs+reducer.n_components])     #todo data_umap
+            labels = gmm.fit_predict(df_pca.values)
             # save data
             index = j + 1 + i * n_component.shape[0]
             title = 'gmm_' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
@@ -2809,23 +2847,19 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     df_gmm_labels = df_pca_umap_hdbscan_gmm.iloc[:, -nGs:]
     # print("gmm label: ", nGs)
 
-    for (columnName, columnData) in df_gmm_labels.iteritems():
+    fig, axes = plt.subplots(2, 5, figsize=(15, 12), subplot_kw={'xticks': (), 'yticks': ()})
+    for (columnName, columnData), ax in zip(df_gmm_labels.iteritems(), axes.ravel()):
         print('Column Name : ', columnName)
         print('Column Contents : ', np.unique(columnData.values))
-        # regInd = ImzObj.get_region_indices(regID)
-        # xr, yr, zr, _ = ImzObj.get_region_range(regID)
-        # xx, yy, _ = ImzObj.get_region_shape(regID)
-        sarray1 = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
-        for idx, coor in enumerate(localCoor):
-            sarray1[coor[0], coor[1]] = columnData.values[idx] + 1
-        fig, ax = plt.subplots(figsize=(6, 8))
-        sarrayIm = ax.imshow(sarray1)
-        fig.colorbar(sarrayIm)
-        ax.set_title('reg{}: {}'.format(regID, columnName), fontsize=15, loc='center')
-        plt.show()
+        imdata = columnData.values.reshape(regionshape)
+        im = ax.imshow(imdata, cmap='simple_list')
+        fig.colorbar(im, ax=ax, shrink=0.5)
+        ax.set_title('reg{}: umap_{}'.format(regID, columnName), fontsize=15, loc='center')
+        # plt.show()
         if save_rseg:
             namepy = os.path.join(regDir, '{}_{}.npy'.format(exprun, columnName))
-            np.save(namepy, sarray1)
+            np.save(namepy, imdata)
+    fig.show()
     return
 
 def madev(d, axis=None):

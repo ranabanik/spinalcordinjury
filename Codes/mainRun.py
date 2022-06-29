@@ -37,7 +37,7 @@ mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 # print(mspathList)
 
 # ImzObj = ImzmlAll(mspathList[0])
-msmlfunc5(mspathList[0], regID = 1, threshold=0.99, exprun='pca_new')
+msmlfunc5(mspathList[0], regID=1, threshold=0.99, exprun='pca_new')
 
 if __name__ != '__main__':
     # for s in range(nPixels):

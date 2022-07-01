@@ -35,6 +35,16 @@ from tqdm import tqdm, tqdm_notebook
 import joblib
 from collections import defaultdict
 
+def findValInd(_list, func=max):
+    """
+    :param _list: the list
+    :param func: max default, min or so
+    :return: value and index
+    """
+    _value = func(_list)
+    _index = _list.index(_value)
+    return _value, _index
+
 class ImzmlAll(object):
     def __init__(self, mspath):
         self.mspath = mspath

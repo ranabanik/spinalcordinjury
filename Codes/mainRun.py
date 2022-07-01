@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Codes.Utilities import msmlfunc5, matchSpecLabel2, ImzmlAll, rawVSprocessed
+from Codes.Utilities import msmlfunc5, msmlfunc6, matchSpecLabel2, ImzmlAll, rawVSprocessed
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -37,7 +37,7 @@ mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 # print(mspathList)
 
 # ImzObj = ImzmlAll(mspathList[0])
-msmlfunc5(mspathList[0], regID=1, threshold=0.99, exprun='pca_new')
+msmlfunc6(mspathList[0], regID=1, threshold=0.85, exprun='pca_new')
 
 if __name__ != '__main__':
     # for s in range(nPixels):

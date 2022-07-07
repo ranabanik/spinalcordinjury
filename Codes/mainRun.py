@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Codes.Utilities import msmlfunc5, msmlfunc6, matchSpecLabel2, ImzmlAll, rawVSprocessed
+from Codes.Utilities import _2d_to_3d, normalize_spectrum, msmlfunc6, matchSpecLabel2, ImzmlAll, rawVSprocessed
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -13,17 +13,23 @@ import matplotlib as mtl
 # mtl.use('TkAgg')    # required for widget slider...
 from scipy.io import loadmat, savemat
 from scipy.stats import stats
+from scipy import signal
 import seaborn as sns
 import pandas as pd
 from tqdm import tqdm
 import time
-from Codes.imzml import IMZMLExtract, normalize_spectrum, getionimage
+from Codes.imzml import IMZMLExtract, getionimage
 from pyimzml.ImzMLParser import _bisect_spectrum
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.cm as cm
 from scipy import interpolate
 from pyimzml.ImzMLParser import ImzMLParser
 from ms_peak_picker import pick_peaks
 import h5py
+from scipy.sparse import csc_matrix, eye, diags
+from scipy.sparse.linalg import spsolve
+
+from scipy.signal import argrelextrema
 
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
 posLip = r'C:\Data\210427-Chen_poslip' #'/media/banikr/DATA/MALDI/demo_banikr_'
@@ -34,10 +40,132 @@ posLipNew4 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate4A_poslipid
 
 pathList = [posLip, posLipNew] #, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
-# print(mspathList)
-
+print(mspathList)
+regID = 1
 # ImzObj = ImzmlAll(mspathList[0])
-msmlfunc6(mspathList[0], regID=1, threshold=0.85, exprun='pca_new')
+# regionshape, lCoords = ImzObj.get_region_shape_coords(regID)
+msmlfunc6(mspathList[0], regID=regID)
+# _, _, regionshape, lCoors = ImzObj.resample_region(regID=1, tol=0.01, savedata=True)
+# print(np.array(regionshape), type(regionshape))
+# print(lCoors)
+# mz, spec = ImzObj.parser.getspectrum(10)
+# spec_bc = ImzObj.baseline_als_optimized(spec)
+# plt.plot(mz, spec)
+# plt.show()
+# peakpath = os.path.join(r'C:\Data\210427-Chen_poslip\reg_1', 'resampled_reg_1_tol_0.01.h5')
+# pFile = h5py.File(peakpath, 'r')
+# print(pFile.keys())
+
+def med_base_correct(spec1):
+    m = np.round(np.median(spec1))
+    print("m >>", m)
+    spec_ = np.array(copy.deepcopy(spec1))
+    m_ = np.round(np.median(spec_[spec_.nonzero()]))
+    print("m_ >>", m_)
+    while m_ > 2500:
+        spec_ = spec_ - m_
+        spec_[spec_ < 0] = 0
+        # nzInd = np.nonzero(spec_)
+        # m_ = np.round(np.median(spec_[nzInd]))
+        m_ = np.round(np.median(spec_[spec_.nonzero()]))
+        plt.plot(mz, spec_)
+        plt.title(m_)
+        plt.show()
+        print("m_ >>", m_)
+    return spec_, m_
+
+# smoothspec, med_ = med_base_correct(spec)
+# print("median >>", med_)
+# smoothspec = signal.savgol_filter(spec, window_length=11, polyorder=3, mode='nearest')
+# smoothspec[smoothspec < 0] = 0
+
+# +-------------------------------------------------+
+# |     resampled, mean of spectra, peak-picked,    |
+# |     kde clustering of M/Z, UMAP-HDBSCAN         |
+# +-------------------------------------------------+
+if __name__ != '__main__':
+    ImzObj.resample_region(regID=1, tol=0.01, savedata=True)
+    # check #1328
+    resPath = glob(os.path.join(posLip, '*.h5'))[0]
+    print(resPath)
+    pFile = h5py.File(resPath, 'r')
+    print(pFile.keys())
+    data = np.array(pFile['spectra'])
+    mzbinned = pFile['mzrange']
+    regionshape = pFile['regionshape']
+    lCoorIdx = pFile['coordinates']
+    print(data.shape)
+
+    peakspec, peakmz = ImzObj.peak_pick(spectra=data, refmz=mzbinned)
+    print(peakspec.shape)
+
+
+
+# savepeak = os.path.join(posLip, 'peak_picked_reg{}.h5'.format(regID))
+# pfile = h5py.File(savepeak, 'r')
+# peakspec = np.array(pfile['peakspectra'])
+# peakmz = np.array(pfile['peakmzs'])
+# # print(peakmz.shape, peakspec.shape)
+# # print(peakmz)
+#
+# # removing sparse features...
+# nz_cent = []
+# for feat in range(peakspec.shape[1]):
+#     div = round((100 * (len(peakspec[:, feat].nonzero()[0]) / peakspec.shape[0])), 2)
+#     nz_cent.append(div)
+#     # break
+#
+# plt.hist(nz_cent, bins=100)
+# plt.show()
+#
+#
+# # print(nz_cent)
+# # print(len())
+#
+# # print(peakspec_feat_full.shape)
+#
+#
+# # print(images_feat_flat.shape)
+#
+# # peak_norm = np.zeros_like()
+# # for s in range(peakspec.shape[0]):
+# #     peak_norm[s, :] = normalize_spectrum(peakspec[s, :], normalize='tic')
+#
+# from sklearn.preprocessing import StandardScaler as SS
+# from sklearn.preprocessing import RobustScaler as RS
+# from sklearn.preprocessing import PowerTransformer as PT
+# from sklearn.preprocessing import QuantileTransformer as QT
+#
+#
+# # peakspec_qt = QT(output_distribution='normal').fit_transform(peak_norm)
+# print(np.mean(images_feat_flat_norm), np.std(images_feat_flat_norm))
+# print(np.mean(images_feat_flat_norm_ss), np.std(images_feat_flat_norm_ss))
+# print(np.mean(images_feat_flat_norm_pt), np.std(images_feat_flat_norm_pt))
+#
+# f = 291
+# plt.hist(images_feat_flat_norm[:, f], bins=100)
+# plt.show()
+# plt.hist(images_feat_flat_norm_ss[:, f], bins=100)
+# plt.show()
+# plt.hist(images_feat_flat_norm_pt[:, f], bins=100)
+# plt.show()
+
+# if __name__ == '__main__':
+     # .iloc[:, 0:nPCs] or df_pca.values)  # on pca
+    # df_pca_umap = copy.deepcopy(df_pca)
+    # for i in range(reducer.n_components):
+    #     df_pca_umap.insert(df_pca_umap.shape[1], column='umap_{}'.format(i + 1), value=data_umap[:, i])
+
+
+def spectrumStat(spectrum):
+    spectrum = np.asarray(spectrum)
+    specNZ = spectrum[spectrum.nonzero()]
+    quan75_ = np.percentile(specNZ, 75)
+    per95_ = np.percentile(specNZ, 95)
+    spec75nz = specNZ[specNZ > quan75_]
+    plt.hist(spec75nz)
+    plt.show()
+# msmlfunc6(mspathList[0], regID=1, threshold=0.85, exprun='pca_new')
 
 if __name__ != '__main__':
     # for s in range(nPixels):
@@ -654,15 +782,7 @@ if __name__ != '__main__':
     # spectra_arPLS[spectra_arPLS<0]=0
     # m_ = np.round(np.median(spec1))
 
-    def med_base_correct(spec1):
-        m_ = np.round(np.median(spec1))
-        spec_ = spec1
-        while m_ > 2500:
-            spec_ = spec_ - m_
-            spec_[spec_ < 0] = 0
-            nzInd = np.nonzero(spec_)
-            m_ = np.round(np.median(spec_[nzInd]))
-        return spec_, m_
+
 
     spmd, md = med_base_correct(spec1)
     print("md", md)

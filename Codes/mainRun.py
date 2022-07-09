@@ -44,7 +44,7 @@ print(mspathList)
 regID = 1
 # ImzObj = ImzmlAll(mspathList[0])
 # regionshape, lCoords = ImzObj.get_region_shape_coords(regID)
-msmlfunc6(mspathList[0], regID=regID)
+msmlfunc6(mspathList[0], regID=regID, threshold=0.85)
 # _, _, regionshape, lCoors = ImzObj.resample_region(regID=1, tol=0.01, savedata=True)
 # print(np.array(regionshape), type(regionshape))
 # print(lCoors)

@@ -8,6 +8,7 @@ import pandas as pd
 import copy
 import plotly.express as px
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import TextArea, AnnotationBbox
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import h5py
 from scipy.sparse import diags, spdiags, linalg
@@ -37,12 +38,6 @@ from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
 from tqdm import tqdm, tqdm_notebook
 import joblib
 from collections import defaultdict
-
-
-def find_nearest(array, value):
-    array = np.asarray(array)
-    idx = (np.abs(array - value)).argmin()
-    return array[idx]
 
 def _2d_to_3d(array2d, regionshape, Coord):
     nPixels, nMz = array2d.shape
@@ -456,22 +451,27 @@ class ImzmlAll(object):
             meanintensity.append(np.mean(array2D, axis=0))
         return np.mean(np.array(meanintensity, dtype=np.float32), axis=0)
 
-    def get_ion_images(self, regID, array2D=None, mzrange=None, top=True):
+    def get_ion_images(self, regID, peakspectra=None, peakmzs=None, top=True,):
         """
         For visualization, to see if sufficient ion images could be generated...
         peak: plot peak images, default: True
         """
-        if any(v is None for v in [array2D, mzrange]):
-            array2D, mzrange, regionshape,lCoorIdx = self.resample_region(regID, tol=0.02)
-            spectra_peak_picked, peakmzs = self.peak_pick(array2D, refmz=mzrange)
+        if any(v is None for v in [peakspectra, peakmzs]):
+            array2D, mzrange, regionshape, lCoorIdx = self.resample_region(regID, tol=0.02)
+            peakspectra, peakmzs = self.peak_pick(array2D, refmz=mzrange)
         # array2D, longestmz, regionshape, lCoorIdx = self.get_region_data(regID)
-            peak3D = np.zeros([regionshape[0], regionshape[1], len(peakmzs)])
-            for idx, coord in enumerate(lCoorIdx):
-                peak3D[coord[0], coord[1], :] = spectra_peak_picked[idx, :]
-
+        else:
+            regionshape, lCoorIdx = self.get_region_shape_coords(regID)
+        # peak3D = np.zeros([regionshape[0], regionshape[1], len(peakmzs)])
+        # for idx, coord in enumerate(lCoorIdx):
+        #     peak3D[coord[0], coord[1], :] = peakspectra[idx, :]
+        peak3D = _2d_to_3d(peakspectra, regionshape, lCoorIdx)
         colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
         n_bin = 100
-        mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
+        if __name__ != '__main__':
+            TIME_STAMP = time.strftime('%Y-%m-%d-%H-%M-%S')
+            print(TIME_STAMP)
+            mtl.colormaps.register(LinearSegmentedColormap.from_list(name='{}_list'.format(TIME_STAMP), colors=colors, N=n_bin))
         imgN = 50   # how many images to take and plot
         if top: # top variance images...
             peakvar = []
@@ -496,7 +496,7 @@ class ImzmlAll(object):
             for c in range(Nc):
                 # Generate data with a range that varies from one plot to the next.
                 images.append(axs[r, c].imshow(peak3D[..., topmzInd[pv]].T, origin='lower',
-                                               cmap='simple_list'))  # 'RdBu_r')) #
+                                               cmap='{}_list'.format(TIME_STAMP)))  # 'RdBu_r')) #
                 axs[r, c].label_outer()
                 axs[r, c].set_axis_off()
                 axs[r, c].set_title('{}'.format(peakmzs[topmzInd[pv]]), fontsize=5, pad=0.25)
@@ -805,7 +805,7 @@ def find_nearest(array, value):
     """
     array = np.asarray(array)
     idx = (np.abs(array - value)).argmin()
-    return array[idx]
+    return array[idx] #[0]
 
 def normalize_spectrum(spectrum, normalize=None, max_region_value=None):
     """Normalizes a single spectrum.
@@ -2997,14 +2997,14 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     fig.show()
     return
 
-def msmlfunc6(mspath, regID, save_rseg=False): # threshold, exprun,
+def msmlfunc6(mspath, regID, threshold=0.85, save_rseg=False): # exprun,
     """
     performs ML on resampled and peak picked spectra based on tolerance
     without interpolation...
     """
     colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
     n_bin = 100
-    mtl.colormaps.register(LinearSegmentedColormap.from_list(name='simple_list', colors=colors, N=n_bin))
+    mtl.colormaps.register(LinearSegmentedColormap.from_list(name='msml_list', colors=colors, N=n_bin))
     plot_spec = True
     plot_pca = True
     plot_umap = True
@@ -3043,10 +3043,29 @@ def msmlfunc6(mspath, regID, save_rseg=False): # threshold, exprun,
         div = round((100 * (len(peakspectra[:, feat].nonzero()[0]) / peakspectra.shape[0])), 2)
         nz_cent.append(div)
     nz_cent = np.array(nz_cent, dtype=np.float32)
-    remove_perc_ = 1
+    remove_perc_ = 99
+    fig, ax = plt.subplots(dpi=200)
+    offsetbox = TextArea("{} out of {} features has less than {}% \nnon-zero elements: too sparse".format(
+        len(np.where(nz_cent <= remove_perc_)[0]), len(nz_cent), remove_perc_))
+    xy = (2, 2000)
+    ab = AnnotationBbox(offsetbox, xy,
+                        xybox=(0.2, xy[1]),
+                        xycoords='data',
+                        boxcoords=("axes fraction", "data"),
+                        box_alignment=(0., 0.5),
+                        arrowprops=dict(arrowstyle="->"))
+    ax.hist(nz_cent, bins=50, color='blue')
+    ax.set_xlabel("%", fontsize=10)
+    ax.set_ylabel("#features", fontsize=10)
+    ax.set_title("% of non-zero elements in features", fontsize=10, fontweight='bold')
+    ax.add_artist(ab)
+    plt.show()
     peakspec_feat_full = np.delete(peakspectra, np.where(nz_cent <= remove_perc_)[0], axis=1)
     peakspec_feat_null = np.delete(peakspectra, np.where(nz_cent > remove_perc_)[0], axis=1)
-
+    peakmzs_feat = np.delete(peakmzs, np.where(nz_cent <= remove_perc_)[0]).reshape(-1)
+    peakmzs_null = np.delete(peakmzs, np.where(nz_cent > remove_perc_)[0]).reshape(-1)
+    ImzObj = ImzmlAll(mspath)
+    ImzObj.get_ion_images(regID, peakspec_feat_full, peakmzs_feat, top=True)
     images_feat = _2d_to_3d(peakspec_feat_full, regionshape, localCoord)
     images_null = _2d_to_3d(peakspec_feat_null, regionshape, localCoord)
     images_feat_flat = images_feat.reshape(-1, images_feat.shape[2])
@@ -3059,155 +3078,358 @@ def msmlfunc6(mspath, regID, save_rseg=False): # threshold, exprun,
     # +------------------+
     # |      UMAP        |
     # +------------------+
-    # u_neigh = 12  # from grid-parameter search in Hang Hu paper(visual plot)
-    # u_comp = 3
-    # u_min_dist = 0.025  # from grid-param Hang Hu paper(visual plot)
-    # reducer = UMAP(n_neighbors=u_neigh,
-    #                # default 15, The size of local neighborhood (in terms of number of neighboring sample points) used for manifold approximation.
-    #                n_components=u_comp,  # default 2, The dimension of the space to embed into.
-    #                metric='cosine',
-    #                # default 'euclidean', The metric to use to compute distances in high dimensional space.
-    #                n_epochs=1000,
-    #                # default None, The number of training epochs to be used in optimizing the low dimensional embedding. Larger values result in more accurate embeddings.
-    #                learning_rate=1.0,  # default 1.0, The initial learning rate for the embedding optimization.
-    #                init='spectral',
-    #                # default 'spectral', How to initialize the low dimensional embedding. Options are: {'spectral', 'random', A numpy array of initial embedding positions}.
-    #                min_dist=u_min_dist,  # default 0.1, The effective minimum distance between embedded points.
-    #                spread=1.0,
-    #                # default 1.0, The effective scale of embedded points. In combination with ``min_dist`` this determines how clustered/clumped the embedded points are.
-    #                low_memory=False,
-    #                # default False, For some datasets the nearest neighbor computation can consume a lot of memory. If you find that UMAP is failing due to memory constraints consider setting this option to True.
-    #                set_op_mix_ratio=1.0,
-    #                # default 1.0, The value of this parameter should be between 0.0 and 1.0; a value of 1.0 will use a pure fuzzy union, while 0.0 will use a pure fuzzy intersection.
-    #                local_connectivity=1,
-    #                # default 1, The local connectivity required -- i.e. the number of nearest neighbors that should be assumed to be connected at a local level.
-    #                repulsion_strength=1.0,
-    #                # default 1.0, Weighting applied to negative samples in low dimensional embedding optimization.
-    #                negative_sample_rate=5,
-    #                # default 5, Increasing this value will result in greater repulsive force being applied, greater optimization cost, but slightly more accuracy.
-    #                transform_queue_size=4.0,
-    #                # default 4.0, Larger values will result in slower performance but more accurate nearest neighbor evaluation.
-    #                a=None,
-    #                # default None, More specific parameters controlling the embedding. If None these values are set automatically as determined by ``min_dist`` and ``spread``.
-    #                b=None,
-    #                # default None, More specific parameters controlling the embedding. If None these values are set automatically as determined by ``min_dist`` and ``spread``.
-    #                random_state=RandomState,
-    #                # default: None, If int, random_state is the seed used by the random number generator;
-    #                metric_kwds=None,
-    #                # default None) Arguments to pass on to the metric, such as the ``p`` value for Minkowski distance.
-    #                angular_rp_forest=False,
-    #                # default False, Whether to use an angular random projection forest to initialise the approximate nearest neighbor search.
-    #                target_n_neighbors=-1,
-    #                # default -1, The number of nearest neighbors to use to construct the target simplcial set. If set to -1 use the ``n_neighbors`` value.
-    #                # target_metric='categorical', # default 'categorical', The metric used to measure distance for a target array is using supervised dimension reduction. By default this is 'categorical' which will measure distance in terms of whether categories match or are different.
-    #                # target_metric_kwds=None, # dict, default None, Keyword argument to pass to the target metric when performing supervised dimension reduction. If None then no arguments are passed on.
-    #                # target_weight=0.5, # default 0.5, weighting factor between data topology and target topology.
-    #                transform_seed=42,
-    #                # default 42, Random seed used for the stochastic aspects of the transform operation.
-    #                verbose=True,  # default False, Controls verbosity of logging.
-    #                unique=False
-    #                # default False, Controls if the rows of your data should be uniqued before being embedded.
-    #                )
-    # data_umap = reducer.fit_transform(images_feat_flat_norm_ss)
-    # # +---------------+
-    # # |   UMAP plot   |
-    # # +---------------+
-    # if plot_umap:
-    #     plt.figure(figsize=(12, 10))
-    #     plt.scatter(data_umap[:, 0], data_umap[:, 1], facecolors='None', edgecolors=cm.tab20(10), alpha=0.5)
-    #     plt.xlabel('UMAP1', fontsize=30)  # only difference part from last one
-    #     plt.ylabel('UMAP2', fontsize=30)
-    #
-    #     # theme
-    #     plt.xticks(fontsize=20)
-    #     plt.yticks(fontsize=20)
-    #     plt.tick_params(size=10, color='black')
-    #
-    #     ax = plt.gca()  # Get the current Axes instance
-    #
-    #     for axis in ['top', 'bottom', 'left', 'right']:
-    #         ax.spines[axis].set_linewidth(3)
-    #     ax.tick_params(width=3)
-    #     plt.show()
-    #
-    # # +-------------+
-    # # |   HDBSCAN   |
-    # # +-------------+
-    # HDBSCAN_soft = False
-    # min_cluster_size = 250
-    # min_samples = 30
-    # cluster_selection_method = 'eom'  # eom
-    # if HDBSCAN_soft:
-    #     clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
-    #                                 cluster_selection_method=cluster_selection_method, prediction_data=True) \
-    #         .fit(data_umap)
-    #     soft_clusters = hdbscan.all_points_membership_vectors(clusterer)
-    #     labels = np.argmax(soft_clusters, axis=1)
-    # else:
-    #     clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
-    #                                 cluster_selection_method=cluster_selection_method).fit(data_umap)
-    #     labels = clusterer.labels_
-    #
-    # # process HDBSCAN data
-    # n_clusters_est = np.max(labels) + 1
-    # if HDBSCAN_soft:
-    #     title = 'estimated number of clusters: ' + str(n_clusters_est)
-    # else:
-    #     labels[labels == -1] = 19
-    #     title = 'estimated number of clusters: ' + str(n_clusters_est) + ', noise pixels are coded in cyan'
-    # # plot
-    # plt.figure(figsize=(12, 10))
-    # plt.scatter(data_umap[:, 0], data_umap[:, 1], facecolors='None', edgecolors=cm.tab20(labels), alpha=0.9)
-    # plt.xlabel('UMAP1', fontsize=30)  # only difference part from last one
-    # plt.ylabel('UMAP2', fontsize=30)
-    #
-    # # theme
-    # plt.xticks(fontsize=20)
-    # plt.yticks(fontsize=20)
-    # plt.tick_params(size=10, color='black')
-    # plt.title(title, fontsize=20)
-    #
-    # ax = plt.gca()  # Get the current Axes instance
-    #
-    # for axis in ['top', 'bottom', 'left', 'right']:
-    #     ax.spines[axis].set_linewidth(3)
-    # ax.tick_params(width=3)
-    # plt.show()
-    # chart(data_umap, labels)
+    u_neigh = 12  # from grid-parameter search in Hang Hu paper(visual plot)
+    u_comp = 3
+    u_min_dist = 0.025  # from grid-param Hang Hu paper(visual plot)
+    reducer = UMAP(n_neighbors=u_neigh,
+                   # default 15, The size of local neighborhood (in terms of number of neighboring sample points) used for manifold approximation.
+                   n_components=u_comp,  # default 2, The dimension of the space to embed into.
+                   metric='cosine',
+                   # default 'euclidean', The metric to use to compute distances in high dimensional space.
+                   n_epochs=1000,
+                   # default None, The number of training epochs to be used in optimizing the low dimensional embedding. Larger values result in more accurate embeddings.
+                   learning_rate=1.0,  # default 1.0, The initial learning rate for the embedding optimization.
+                   init='spectral',
+                   # default 'spectral', How to initialize the low dimensional embedding. Options are: {'spectral', 'random', A numpy array of initial embedding positions}.
+                   min_dist=u_min_dist,  # default 0.1, The effective minimum distance between embedded points.
+                   spread=1.0,
+                   # default 1.0, The effective scale of embedded points. In combination with ``min_dist`` this determines how clustered/clumped the embedded points are.
+                   low_memory=False,
+                   # default False, For some datasets the nearest neighbor computation can consume a lot of memory. If you find that UMAP is failing due to memory constraints consider setting this option to True.
+                   set_op_mix_ratio=1.0,
+                   # default 1.0, The value of this parameter should be between 0.0 and 1.0; a value of 1.0 will use a pure fuzzy union, while 0.0 will use a pure fuzzy intersection.
+                   local_connectivity=1,
+                   # default 1, The local connectivity required -- i.e. the number of nearest neighbors that should be assumed to be connected at a local level.
+                   repulsion_strength=1.0,
+                   # default 1.0, Weighting applied to negative samples in low dimensional embedding optimization.
+                   negative_sample_rate=5,
+                   # default 5, Increasing this value will result in greater repulsive force being applied, greater optimization cost, but slightly more accuracy.
+                   transform_queue_size=4.0,
+                   # default 4.0, Larger values will result in slower performance but more accurate nearest neighbor evaluation.
+                   a=None,
+                   # default None, More specific parameters controlling the embedding. If None these values are set automatically as determined by ``min_dist`` and ``spread``.
+                   b=None,
+                   # default None, More specific parameters controlling the embedding. If None these values are set automatically as determined by ``min_dist`` and ``spread``.
+                   random_state=RandomState,
+                   # default: None, If int, random_state is the seed used by the random number generator;
+                   metric_kwds=None,
+                   # default None) Arguments to pass on to the metric, such as the ``p`` value for Minkowski distance.
+                   angular_rp_forest=False,
+                   # default False, Whether to use an angular random projection forest to initialise the approximate nearest neighbor search.
+                   target_n_neighbors=-1,
+                   # default -1, The number of nearest neighbors to use to construct the target simplcial set. If set to -1 use the ``n_neighbors`` value.
+                   # target_metric='categorical', # default 'categorical', The metric used to measure distance for a target array is using supervised dimension reduction. By default this is 'categorical' which will measure distance in terms of whether categories match or are different.
+                   # target_metric_kwds=None, # dict, default None, Keyword argument to pass to the target metric when performing supervised dimension reduction. If None then no arguments are passed on.
+                   # target_weight=0.5, # default 0.5, weighting factor between data topology and target topology.
+                   transform_seed=42,
+                   # default 42, Random seed used for the stochastic aspects of the transform operation.
+                   verbose=True,  # default False, Controls verbosity of logging.
+                   unique=False
+                   # default False, Controls if the rows of your data should be uniqued before being embedded.
+                   )
+    data_umap = reducer.fit_transform(images_feat_flat_norm_ss)
+    # +---------------+
+    # |   UMAP plot   |
+    # +---------------+
+    if plot_umap:
+        plt.figure(figsize=(12, 10))
+        plt.scatter(data_umap[:, 0], data_umap[:, 1], facecolors='None', edgecolors=cm.tab20(10), alpha=0.5)
+        plt.xlabel('UMAP1', fontsize=30)  # only difference part from last one
+        plt.ylabel('UMAP2', fontsize=30)
+
+        # theme
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
+        plt.tick_params(size=10, color='black')
+
+        ax = plt.gca()  # Get the current Axes instance
+
+        for axis in ['top', 'bottom', 'left', 'right']:
+            ax.spines[axis].set_linewidth(3)
+        ax.tick_params(width=3)
+        plt.show()
+
+    # +-------------+
+    # |   HDBSCAN   |
+    # +-------------+
+    HDBSCAN_soft = False
+    min_cluster_size = 250
+    min_samples = 30
+    cluster_selection_method = 'eom'  # eom
+    if HDBSCAN_soft:
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
+                                    cluster_selection_method=cluster_selection_method, prediction_data=True) \
+            .fit(data_umap)
+        soft_clusters = hdbscan.all_points_membership_vectors(clusterer)
+        labels = np.argmax(soft_clusters, axis=1)
+    else:
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
+                                    cluster_selection_method=cluster_selection_method).fit(data_umap)
+        labels = clusterer.labels_
+
+    # process HDBSCAN data
+    n_clusters_est = np.max(labels) + 1
+    if HDBSCAN_soft:
+        title = 'estimated number of clusters: ' + str(n_clusters_est)
+    else:
+        labels[labels == -1] = 19
+        title = 'estimated number of clusters: ' + str(n_clusters_est) + ', noise pixels are coded in cyan'
+    # plot
+    plt.figure(figsize=(12, 10))
+    plt.scatter(data_umap[:, 0], data_umap[:, 1], facecolors='None', edgecolors=cm.tab20(labels), alpha=0.9)
+    plt.xlabel('UMAP1', fontsize=30)  # only difference part from last one
+    plt.ylabel('UMAP2', fontsize=30)
+
+    # theme
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.tick_params(size=10, color='black')
+    plt.title(title, fontsize=20)
+
+    ax = plt.gca()  # Get the current Axes instance
+
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(3)
+    ax.tick_params(width=3)
+    plt.show()
+    chart(data_umap, labels)
     # plt.suptitle("n_neighbors={}, Cosine metric".format(u_neigh))
 
-    # cluster peak M/Zs with KDE
-    peakmzs_feat = np.delete(peakmzs, np.where(nz_cent <= remove_perc_)[0]).reshape(-1, 1)
+    # +------------------------------+
+    # |  cluster peak M/Zs with KDE  |
+    # +------------------------------+
+    # def kdebandwidth(peakmzs_feat, bw):
+    kde = KernelDensity(kernel='gaussian', bandwidth=30).fit(peakmzs_feat) # 30
+    s = np.linspace(min(peakmzs_feat), max(peakmzs_feat))
+    e = kde.score_samples(s.reshape(-1, 1))
 
-    def kdebandwidth(peakmzs_feat, bw):
-        kde = KernelDensity(kernel='gaussian', bandwidth=bw).fit(peakmzs_feat) # 30
-        s = np.linspace(min(peakmzs_feat), max(peakmzs_feat))
-        e = kde.score_samples(s.reshape(-1, 1))
+    mi, ma = signal.argrelextrema(e, np.less)[0], signal.argrelextrema(e, np.greater)[0]
+    mi_ = np.sort(np.append(mi, [0, len(s) - 1]))
 
-        mi, ma = signal.argrelextrema(e, np.less)[0], signal.argrelextrema(e, np.greater)[0]
-        mi_ = np.sort(np.append(mi, [0, len(s) - 1]))
+    center_ = s[ma].reshape(-1)
 
-        center_ = s[ma].reshape(-1)
+    cluster_center = np.asarray([find_nearest(peakmzs_feat, i) for i in center_]).reshape(-1)
+    print("there are {} clusters(m/z s) with centers at: {}".format(len(cluster_center), cluster_center))
+    clusters = []
+    for mdx in range(len(mi_) - 1):
+        cluster = peakmzs_feat[np.where(
+            (peakmzs_feat >= s[mi_][mdx]) & (peakmzs_feat < s[mi_][mdx + 1]))]
+        # print(len(cluster), "\n", cluster)
+        clusters.append(cluster)
+    #
 
-        cluster_center = [find_nearest(peakmzs_feat, i).reshape(-1) for i in center_]
-        # clusters = []
-        # for mdx in range(len(mi_) - 1):
-        #     cluster = peakmzs_feat[np.where(
-        #         (peakmzs_feat >= s[mi_][mdx]) & (peakmzs_feat < s[mi_][mdx + 1]))]
-        #     # print(len(cluster), "\n", cluster)
-        #     clusters.append(cluster)
-        #
-        # plt.plot(s, e, 'orange')
-        # plt.vlines(cluster_center, ymin=min(e), ymax=max(e), colors='blue')
-        # plt.show()
-        return len(cluster_center)
-    cl = []
-    for bw in range(1, 100):
-        cl.append(kdebandwidth(peakmzs_feat, bw))
-
-    plt.plot(cl)
+    plt.plot(s, e, 'orange')
+    plt.vlines(cluster_center, ymin=min(e), ymax=max(e), colors='blue')
     plt.show()
+        # return len(cluster_center)
+    # cl = []
+    # for bw in range(1, 100):
+    #     cl.append(kdebandwidth(peakmzs_feat, bw))
 
+    # fig, ax = plt.subplots(dpi=100)
+    # ax.plot(np.arange(1, 100), cl)
+    # ax.set_xlim(0, 104)
+    # ax.set_xticks(np.arange(1, 101, 6))
+    # ax.set_xlabel("bandwidth", fontsize=10)
+    # ax.set_ylabel("#clusters", fontsize=10)
+    # ax.set_title("Kernel Density Estimation - peak m/z s", fontsize=15)
+    # plt.show()
+    from sklearn.cluster import KMeans
+    from sklearn.metrics.pairwise import euclidean_distances
+
+    class PFA(object):
+        def __init__(self, n_features, q=None):
+            self.q = q
+            self.n_features = n_features
+
+        def fit(self, X):
+            if not self.q:
+                self.q = X.shape[1]
+
+            # sc = StandardScaler()
+            X = SS().fit_transform(X)
+
+            pca = PCA(n_components=self.q).fit(X)
+            A_q = pca.components_.T
+
+            kmeans = KMeans(n_clusters=self.n_features).fit(A_q)
+            clusters = kmeans.predict(A_q)
+            cluster_centers = kmeans.cluster_centers_
+
+            u_labels = np.unique(clusters)
+            for i in u_labels:
+                plt.scatter(A_q[clusters == i, 0], A_q[clusters == i, 1], label=i)
+            plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], s=10, color='k')
+            plt.legend()
+            plt.show()
+
+            HDBSCAN_soft = False
+            min_cluster_size = 250
+            min_samples = 30
+            cluster_selection_method = 'eom'  # eom
+            if HDBSCAN_soft:
+                clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
+                                            cluster_selection_method=cluster_selection_method, prediction_data=True) \
+                    .fit(A_q)
+                soft_clusters = hdbscan.all_points_membership_vectors(clusterer)
+                labels = np.argmax(soft_clusters, axis=1)
+            else:
+                clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
+                                            cluster_selection_method=cluster_selection_method).fit(A_q)
+                labels = clusterer.labels_
+
+            # process HDBSCAN data
+            n_clusters_est = np.max(labels) + 1
+            if HDBSCAN_soft:
+                title = 'estimated number of clusters: ' + str(n_clusters_est)
+            else:
+                labels[labels == -1] = 19
+                title = 'estimated number of clusters: ' + str(n_clusters_est) + ', noise pixels are coded in cyan'
+            # plot
+            plt.figure(figsize=(12, 10))
+            plt.scatter(A_q[:, 0], A_q[:, 1], facecolors='None', edgecolors=cm.tab20(labels), alpha=0.9)
+            plt.xlabel('PFA 1', fontsize=30)  # only difference part from last one
+            plt.ylabel('PFA 2', fontsize=30)
+
+            # theme
+            plt.xticks(fontsize=20)
+            plt.yticks(fontsize=20)
+            plt.tick_params(size=10, color='black')
+            plt.title(title, fontsize=20)
+
+            ax = plt.gca()  # Get the current Axes instance
+
+            for axis in ['top', 'bottom', 'left', 'right']:
+                ax.spines[axis].set_linewidth(3)
+            ax.tick_params(width=3)
+            plt.show()
+            # chart(A_q, labels)
+
+            dists = defaultdict(list)
+            for i, c in enumerate(clusters):
+                dist = euclidean_distances([A_q[i, :]], [cluster_centers[c, :]])[0][0]
+                dists[c].append((i, dist))
+
+            self.indices_ = [sorted(f, key=lambda x: x[1])[0][0] for f in dists.values()]
+            self.features_ = X[:, self.indices_]
+
+    pfa = PFA(n_features=100)
+    pfa.fit(images_feat_flat_norm_ss)
+    X = pfa.features_
+    column_indices = pfa.indices_
+
+    # +------------+
+    # |    PCA     |
+    # +------------+
+    pca = PCA(random_state=RandomState)  # pca object n_components=100,
+    pcs = pca.fit_transform(images_feat_flat_norm_ss)  # (4587, 2000)
+    pca_range = np.arange(1, pca.n_components_, 1)
+    print(">> PCA: number of components #{}".format(pca.n_components_))
+    evr = pca.explained_variance_ratio_
+    evr_cumsum = np.cumsum(evr)
+    cut_evr = find_nearest(evr_cumsum, threshold)
+    nPCs = 20 #np.where(evr_cumsum == cut_evr)[0][0] + 1
+    print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
+    df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
+    loadings = pca.components_.T
+    SSL = np.sum(loadings ** 2, axis=1)
+    n_cols = 5
+    if nPCs % n_cols == 0:
+        n_rows = int(nPCs / n_cols)
+    else:
+        n_rows = nPCs // n_cols + 1
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 12), subplot_kw={'xticks': (), 'yticks': ()})
+    for i, (colname, ax) in enumerate(tqdm(zip(df_pca, axes.ravel()))):
+        # print(i)
+        component = df_pca[colname].values
+        im = ax.imshow(component.reshape(regionshape), cmap='msml_list')
+        ax.set_title("{}. component".format((i + 1)))
+    fig.subplots_adjust(right=0.8)
+    # divider = make_axes_locatable(axes)
+    # cax = divider.append_axes('right', size='5%', pad=0.05)
+    # fig.colorbar(im, cax=cax, ax=ax)
+    # cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+    # fig.colorbar(images[0], ax=axs, orientation='vertical', fraction=.2)
+    fig.colorbar(im, ax=axes, location='right', shrink=0.6)
+    plt.show()
+    if plot_pca:
+        MaxPCs = nPCs + 5
+        fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
+        ax.bar(pca_range[0:MaxPCs], evr[0:MaxPCs] * 100, color="steelblue")
+        ax.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+        ax.set_xlabel('Principal component number', fontsize=30)
+        ax.set_ylabel('Percentage of \n variance explained', fontsize=30)
+        ax.set_ylim([-0.5, 100])
+        ax.set_xlim([-0.5, MaxPCs])
+        ax.grid("on")
+
+        ax2 = ax.twinx()
+        ax2.plot(pca_range[0:MaxPCs], evr_cumsum[0:MaxPCs] * 100, color="tomato", marker="D", ms=7)
+        ax2.scatter(nPCs, cut_evr * 100, marker='*', s=500, facecolor='blue')
+        ax2.yaxis.set_major_formatter(mtl.ticker.PercentFormatter())
+        ax2.set_ylabel('Cumulative percentage', fontsize=30)
+        ax2.set_ylim([-0.5, 100])
+
+        # axis and tick theme
+        ax.tick_params(axis="y", colors="steelblue")
+        ax2.tick_params(axis="y", colors="tomato")
+        ax.tick_params(size=10, color='black', labelsize=25)
+        ax2.tick_params(size=10, color='black', labelsize=25)
+        ax.tick_params(width=3)
+        ax2.tick_params(width=3)
+
+        ax = plt.gca()  # Get the current Axes instance
+
+        for axis in ['top', 'bottom', 'left', 'right']:
+            ax.spines[axis].set_linewidth(3)
+
+        plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
+        plt.show()
+        Nc = 2
+        # MaxPCs = nPCs# + 1
+        # if MaxPCs % Nc != 0:
+        #     Nr = int((nPCs + 1) / Nc)
+        # else:
+        #     Nr = int(nPCs/Nc)
+        #  #MaxPCs
+        # heights = [regionshape[1] for r in range(Nr)]
+        # widths = [regionshape[0] for r in range(Nc)]
+        # fig_width = 5.  # inches
+        # fig_height = fig_width * sum(heights) / sum(widths)
+        # fig, axs = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600, constrained_layout=True,
+        #                         gridspec_kw={'height_ratios': heights})
+        # images = []
+        # pc = 0
+        # image = copy.deepcopy(pcs)
+        # from sklearn.preprocessing import minmax_scale
+        # image = minmax_scale(image.ravel(), feature_range=(10, 255)).reshape(image.shape)
+        # for r in range(Nr):
+        #     for c in range(Nc):
+        #         # Generate data with a range that varies from one plot to the next.
+        #         arrayPC = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
+        #         for idx, coor in enumerate(localCoor):
+        #             arrayPC[coor[0], coor[1]] = image[idx, pc]
+        #         images.append(axs[r, c].imshow(arrayPC.T, origin='lower',
+        #                                            cmap='msml_list'))  # 'RdBu_r')) #
+        #         axs[r, c].label_outer()
+        #         axs[r, c].set_axis_off()
+        #         axs[r, c].set_title('PC{}'.format(pc + 1), fontsize=10, pad=0.25)
+        #         fig.subplots_adjust(top=0.95, bottom=0.02, left=0,
+        #                             right=1, hspace=0.14, wspace=0)
+        #         pc += 1
+        #
+        # def update(changed_image):
+        #     for im in images:
+        #         if (changed_image.get_cmap() != im.get_cmap()
+        #                 or changed_image.get_clim() != im.get_clim()):
+        #             im.set_cmap(changed_image.get_cmap())
+        #             im.set_clim(changed_image.get_clim())
+        #             im.set_tight_layout('tight')
+        #
+        # for im in images:
+        #     im.callbacks.connect('changed', update)
+        # fig.suptitle("PC images {}:reg {}".format(filename, regID))
+        # plt.show()
     return
 
 def madev(d, axis=None):

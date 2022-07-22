@@ -16,14 +16,17 @@ from scipy.io import loadmat, savemat
 from scipy import ndimage, signal, interpolate, stats
 from scipy.spatial.distance import cosine
 import scipy.cluster.hierarchy as sch
+from scipy.linalg import svd
 import pywt
 import mglearn
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import StandardScaler as SS
+from sklearn.preprocessing import minmax_scale
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture as GMM
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.neighbors import KernelDensity
+from sklearn.metrics.pairwise import euclidean_distances
 from umap import UMAP
 import hdbscan
 import matplotlib as mtl
@@ -38,6 +41,7 @@ from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
 from tqdm import tqdm, tqdm_notebook
 import joblib
 from collections import defaultdict
+import cv2
 
 def _2d_to_3d(array2d, regionshape, Coord):
     nPixels, nMz = array2d.shape
@@ -194,6 +198,27 @@ class ImzmlAll(object):
         # print("There are {} regions.".format(num_features))
         return labeled_array, num_features
 
+    def get_region_pixels(self, regID=None):
+        """
+        :param regID:
+        :return: global coordinates
+        """
+        regionCoords = defaultdict(list)
+        labeled_array, num_features = self._get_regions()
+        # plt.imshow(labeled_array)
+        # plt.show()
+        for x in range(0, labeled_array.shape[0]):
+            for y in range(0, labeled_array.shape[1]):
+                if labeled_array[x, y] == 0:
+                    continue
+                regionCoords[labeled_array[x, y]].append((x, y, 1))
+
+        if regID is not None:
+            regionPixels = regionCoords[regID]  # [(704, 180, 1), (705, 178, 1), ...
+            return regionPixels
+        else:
+            return regionCoords
+
     def get_region_shape_coords(self, regID):
         gcoord2index = self._global2index()
         spectralength = 0
@@ -216,23 +241,6 @@ class ImzmlAll(object):
             ypos = coord[1] - miny
             lCoorIdx.append((xpos, ypos))
         return regionshape, lCoorIdx
-
-    def get_region_pixels(self, regID=None):
-        regionCoords = defaultdict(list)
-        labeled_array, num_features = self._get_regions()
-        # plt.imshow(labeled_array)
-        # plt.show()
-        for x in range(0, labeled_array.shape[0]):
-            for y in range(0, labeled_array.shape[1]):
-                if labeled_array[x, y] == 0:
-                    continue
-                regionCoords[labeled_array[x, y]].append((x, y, 1))
-
-        if regID is not None:
-            regionPixels = regionCoords[regID]  # [(704, 180, 1), (705, 178, 1), ...
-            return regionPixels
-        else:
-            return regionCoords
 
     def get_region_range(self, regID, whole=False):
         """
@@ -451,7 +459,41 @@ class ImzmlAll(object):
             meanintensity.append(np.mean(array2D, axis=0))
         return np.mean(np.array(meanintensity, dtype=np.float32), axis=0)
 
-    def get_ion_images(self, regID, peakspectra=None, peakmzs=None, top=True,):
+    def getionimage(self, regID, mz_value, tol=0.1, z=1, reduce_func=sum):
+        """
+        Get an image representation of the intensity distribution
+        of the ion with specified m/z value.
+        By default, the intensity values within the tolerance region are summed.
+        :param mz_value:
+            m/z value for which the ion image shall be returned
+        :param tol:
+            Absolute tolerance for the m/z value, such that all ions with values
+            mz_value-|tol| <= x <= mz_value+|tol| are included. Defaults to 0.1
+        :param z:
+            z Value if spectrogram is 3-dimensional.
+        :param reduce_func:
+            the bahaviour for reducing the intensities between mz_value-|tol| and mz_value+|tol| to a single value. Must
+            be a function that takes a sequence as input and outputs a number. By default, the values are summed.
+        :return:
+            numpy matrix with each element representing the ion intensity in this
+            pixel. Can be easily plotted with matplotlib
+        """
+        tol = abs(tol)
+        regionshape, localCoords = self.get_region_shape_coords(regID)
+        globalCoords = self.get_region_pixels(regID)
+        gcoord2index = self._global2index()
+        im = np.zeros([regionshape[0], regionshape[1]])
+        for i, ((r, c), (x, y, z_)) in enumerate(zip(localCoords, globalCoords)):
+            if z_ == 0:
+                UserWarning("z coordinate = 0 present, if you're getting blank images set getionimage(.., .., z=0)")
+            if z_ == z:
+                sIdx = gcoord2index[(x, y, z_)]
+                mzs, ints = map(lambda p: np.asarray(p), self.parser.getspectrum(sIdx))
+                min_i, max_i = _bisect_spectrum(mzs, mz_value, tol)
+                im[r, c] = reduce_func(ints[min_i:max_i+1])     # y - 1, x - 1
+        return im
+
+    def get_ion_images(self, regID, peakspectra=None, peakmzs=None, **kwargs):
         """
         For visualization, to see if sufficient ion images could be generated...
         peak: plot peak images, default: True
@@ -470,17 +512,19 @@ class ImzmlAll(object):
         n_bin = 100
         if __name__ != '__main__':
             TIME_STAMP = time.strftime('%Y-%m-%d-%H-%M-%S')
-            print(TIME_STAMP)
+            # print(TIME_STAMP)
             mtl.colormaps.register(LinearSegmentedColormap.from_list(name='{}_list'.format(TIME_STAMP), colors=colors, N=n_bin))
         imgN = 50   # how many images to take and plot
-        if top: # top variance images...
+        if kwargs == 'top': # top variance images...
             peakvar = []
             for mz in range(len(peakmzs)):
                 peakvar.append(np.std(peak3D[..., mz]))
             topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-imgN:])
             # topmzInd = sorted(sorted(range(len(peakvar)), reverse=False, key=lambda sub: peakvar[sub])[-imgN-3000:-3000])
-        else:   # random
+        elif kwargs == 'random':   # random
             topmzInd = np.round(np.linspace(0, len(peakmzs) - 1, imgN)).astype(int)
+        else:
+            topmzInd = np.arange(0, 50)
         Nr = 10
         Nc = 5
         heights = [regionshape[1] for r in range(Nr)]
@@ -489,7 +533,7 @@ class ImzmlAll(object):
         fig_height = fig_width * sum(heights) / sum(widths)
         fig, axs = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600, constrained_layout=True,
                                 gridspec_kw={'height_ratios': heights})
-        fig.suptitle('reg {}: ion images'.format(regID), y=0.99)
+        fig.suptitle('reg {}: ion images({})'.format(regID, kwargs), y=0.99)
         images = []
         pv = 0
         for r in range(Nr):
@@ -608,7 +652,7 @@ def umap_it(data, n_neighbors=12, n_components=3,
     return data_umap
 
 def hdbscan_it(data, HDBSCAN_soft = False, min_cluster_size = 250,
-               min_samples = 30, cluster_selection_method = 'eom'):
+               min_samples=30, cluster_selection_method='eom'):
     """
     :param data:
     :param HDBSCAN_soft:
@@ -655,6 +699,185 @@ def hdbscan_it(data, HDBSCAN_soft = False, min_cluster_size = 250,
     plt.show()
     chart(data, labels)
     return labels
+
+def masterPlot(imageList, valueList=None, oneImageshape=None, Title=None, Nc=3):
+    """
+    :param imageList: could be list of n x row x col ndarray
+    :param valueList: list in str(list) format
+    :param oneImageshape:
+    :param Title:
+    :param Nc:
+    :return:
+    """
+    Nr = len(imageList) // Nc + (len(imageList) % Nc > 0)
+    if oneImageshape == None:
+        oneImageshape = np.shape(imageList[0])
+    heights = [oneImageshape[1] for r in range(Nr)]
+    widths = [oneImageshape[0] for c in range(Nc)]
+    fig_width = 5.  # inches
+    fig_height = fig_width * sum(heights) / sum(widths)
+    fig, axes = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600,
+                             constrained_layout=True,
+                             gridspec_kw={'height_ratios': heights})
+    if Nr*Nc > len(imageList):
+        axesList = list(np.arange(Nr * Nc))
+        imgNList = list(np.arange(len(imageList)))
+        new_list = list(set(axesList).difference(imgNList))
+        for i in new_list:
+            dr, dc = np.unravel_index(i, (Nr, Nc), 'C')
+            print("dr, dc", dr, dc)
+            fig.delaxes(axes[dr, dc])
+    if Title == None:
+        Title = 'Plot'
+    if valueList is None:
+        valueList = np.arange(1, len(imageList)+1)
+    fig.suptitle('{}'.format(Title), y=0.99)
+    images = []
+    for i, (image, ax) in enumerate(tqdm(zip(imageList, axes.ravel()), total=len(imageList))):
+        images.append(ax.imshow(image.T, origin='lower', cmap='msml_list'))
+        ax.label_outer()
+        ax.set_axis_off()
+        # if valueList == None:
+        ax.set_title("{}".format(valueList[i]), fontsize=5, pad=0.25)
+        # else:
+        # ax.set_title((valueList[i]), fontsize=5, pad=0.25)
+        ax.set_xlabel("")
+        # fig.get_legend().remove()
+        fig.subplots_adjust(top=0.90, bottom=0.02, left=0,
+                            right=1, hspace=0.14, wspace=0)
+
+
+    def update(changed_image):
+        for im in images:
+            if (changed_image.get_cmap() != im.get_cmap()
+                    or changed_image.get_clim() != im.get_clim()):
+                im.set_cmap(changed_image.get_cmap())
+                im.set_clim(changed_image.get_clim())
+                im.set_tight_layout('tight')
+
+    for im in images:
+        im.callbacks.connect('changed', update)
+    cbar_ax = fig.add_axes([0.95, 0.15, 0.01, 0.55])  # left, bottom, width, height
+    cbar = fig.colorbar(im, cax=cbar_ax, shrink=0.5)
+    cbar.ax.tick_params(labelsize=5) #the tick size on colorbar
+    plt.show()
+
+def kdemzs(peakmzs, bw): #TODO: implement kneedle/find knee
+    if bw is None:
+        cl = []
+        for bw in range(1, 100):
+            nClusters, _ = kdemzs(peakmzs, bw)
+            cl.append(nClusters)
+
+        fig, ax = plt.subplots(dpi=100)
+        ax.plot(np.arange(1, 100), cl)
+        ax.set_xlim(0, 104)
+        ax.set_xticks(np.arange(1, 101, 6))
+        ax.set_xlabel("bandwidth", fontsize=10)
+        ax.set_ylabel("#clusters", fontsize=10)
+        ax.set_title("Kernel Density Estimation - peak m/z s", fontsize=15)
+        plt.show()
+    else:
+        kde = KernelDensity(kernel='gaussian', bandwidth=bw).fit(peakmzs)  # 30
+        s = np.linspace(min(peakmzs), max(peakmzs))
+        e = kde.score_samples(s.reshape(-1, 1))
+
+        mi, ma = signal.argrelextrema(e, np.less)[0], signal.argrelextrema(e, np.greater)[0]
+        mi_ = np.sort(np.append(mi, [0, len(s) - 1]))
+
+        center_ = s[ma].reshape(-1)
+
+        cluster_centers = np.asarray([find_nearest(peakmzs, i) for i in center_]).reshape(-1)
+        print("there are {} clusters(m/z s) with centers at: {}".format(len(cluster_centers), cluster_centers))
+        clusters = []
+        for mdx in range(len(mi_) - 1):
+            cluster = peakmzs[np.where(
+                (peakmzs >= s[mi_][mdx]) & (peakmzs < s[mi_][mdx + 1]))]
+            # print(len(cluster), "\n", cluster)
+            clusters.append(cluster)
+        plt.plot(s, e, 'orange')
+        plt.vlines(cluster_centers, ymin=min(e), ymax=max(e), colors='blue')
+        plt.show()
+    return len(cluster_centers), cluster_centers
+
+def displayImage(matrix):
+    plt.imshow(matrix.T, origin='lower', cmap='msml_list')
+    plt.colorbar()
+    plt.show()
+
+def boxplotit(data, labels, Title):
+    """
+    example: boxplotit([sparse_coherence, dense_coherence], ['sparse', 'dense'], 'spatial coherence')
+    :param data: list
+    :param labels: list
+    :param Title: str
+    :return:
+    """
+    fig, ax1 = plt.subplots(figsize=(10, 6), dpi=600)
+    # labels = ['old', 'new']
+    colors = ['maroon', 'darkblue'] #, 'orangered', 'olive', 'sienna']
+    medianprops = dict(linestyle='-', linewidth=2.5, color='yellow')
+    meanlineprops = dict(linestyle='--', linewidth=2.5, color='brown')
+    # labels = ['max spec', 'corrected']
+    bplot = ax1.boxplot(list(data),
+                        notch=False, sym='+', vert=True,
+                        patch_artist=True, whis=1.5, labels=labels,
+                        medianprops=medianprops, meanprops=meanlineprops,
+                        showfliers=True, showmeans=True, meanline=True)
+    ax1.yaxis.grid(True, linestyle='-', which='major', color='gray',
+                   alpha=0.6)
+    ax1.set(
+        axisbelow=True,  # Hide the grid behind plot objects
+        title='',
+        xlabel='Data',
+        ylabel='Value')
+    ax1.set_title('{}'.format(Title), fontsize=16)
+
+    # colors = ['maroon', 'darkblue', 'orangered', 'olive', 'sienna']
+    medians = [bplot['medians'][i].get_ydata()[0] for i in range(len(labels))]
+    pos = np.arange(len(labels)) + 1
+    upper_labels = [str(round(s, 2)) for s in medians]
+    for tick, label in zip(range(len(labels)), ax1.get_xticklabels()):
+        ax1.text(pos[tick], .97, upper_labels[tick],
+                 transform=ax1.get_xaxis_transform(),
+                 horizontalalignment='center', fontsize=10,
+                 weight='bold',
+                 color= colors[tick]) #'firebrick')  # )
+    # for patch, color in zip(bplot['boxes'], colors):
+    #     patch.set_facecolor(color)
+
+    for patch, color in zip(bplot['boxes'], colors):
+        patch.set_facecolor(color) #'slategrey')
+    fig.show()
+
+def saveimages(images, mzs, directory):
+    """
+    save images in drive
+    :param images: row x column x n
+    :param mzs: list, 1D array
+    :param directory: where to save in the drive
+    :return:
+    """
+    assert (images.shape[-1] == len(mzs))
+
+    def get_mpl_colormap(cmap_name):
+        cmap = plt.get_cmap(cmap_name)
+        # Initialize the matplotlib color map
+        sm = plt.cm.ScalarMappable(cmap=cmap)
+        # Obtain linear color range
+        color_range = sm.to_rgba(np.linspace(0, 1, 256), bytes=True)[:, 2::-1]
+        return color_range.reshape(256, 1, 3)
+
+    if not os.path.isdir(directory):
+        os.mkdir(directory)
+    for mz in range(images.shape[-1]):
+        filename = os.path.join(directory, '{}.png'.format(mzs[mz]))
+        norm_img = np.uint8(cv2.normalize(images[..., mz], None, 0, 255, cv2.NORM_MINMAX))
+        image = cv2.rotate(norm_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        image = cv2.applyColorMap(image, get_mpl_colormap('msml_list'))
+        # image = cv.LUT(image, lut)
+        cv2.imwrite(filename, image)
+    return
 
 class MaldiTofSpectrum(np.ndarray):
     """Numpy NDArray subclass representing a MALDI-TOF Spectrum."""
@@ -3127,18 +3350,19 @@ def msmlfunc5(mspath, regID, threshold, exprun, save_rseg=False):
     fig.show()
     return
 
-def msmlfunc6(mspath, regID, threshold=0.85, save_rseg=False): # exprun,
+def msmlfunc6(mspath, regID, exprun): # exprun,
     """
     performs ML on resampled and peak picked spectra based on tolerance
     without interpolation...
     """
     colors = [(0.1, 0.1, 0.1), (0.9, 0, 0), (0, 0.9, 0), (0, 0, 0.9)]  # Bk -> R -> G -> Bl
-    n_bin = 100
-    mtl.colormaps.register(LinearSegmentedColormap.from_list(name='msml_list', colors=colors, N=n_bin))
-    plot_spec = True
+    color_bin = 100
+    mtl.colormaps.register(LinearSegmentedColormap.from_list(name='msml_list', colors=colors, N=color_bin))
+    umap_hdbscan_ = False
+    kde_cluster_ = False
     plot_pca = True
-    plot_umap = True
     RandomState = 20210131
+    save_rseg = False
     # +------------------------------------+
     # |     read data and save region      |
     # +------------------------------------+
@@ -3155,10 +3379,10 @@ def msmlfunc6(mspath, regID, threshold=0.85, save_rseg=False): # exprun,
             peakspectra = np.array(pfile.get('peakspectra'))
             peakmzs = np.array(pfile.get('peakmzs'))
             regionshape = np.array(pfile.get('regionshape'))
-            localCoord = list(pfile.get('coordinates'))
+            localCoords = list(pfile.get('coordinates'))
     else:
         ImzObj = ImzmlAll(mspath)
-        spectra, refmz, regionshape, localCoord = ImzObj.resample_region(regID, tol=0.01, savedata=True)
+        spectra, refmz, regionshape, localCoords = ImzObj.resample_region(regID, tol=0.01, savedata=True)
         # print(regionshape, type(regionshape))
         # spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
         peakspectra, peakmzs = ImzObj.peak_pick(spectra, refmz)
@@ -3166,14 +3390,36 @@ def msmlfunc6(mspath, regID, threshold=0.85, save_rseg=False): # exprun,
             pfile['peakspectra'] = peakspectra
             pfile['peakmzs'] = peakmzs
             pfile['regionshape'] = np.array(regionshape)
-            pfile['coordinates'] = localCoord
+            pfile['coordinates'] = localCoords
+    savecsv = os.path.join(regDir, 'results_{}.csv'.format(exprun))
+    # +----------------------------+
+    # |       UMAP-HDBSCAN         |
+    # +----------------------------+
+    if umap_hdbscan_:
+        peakspectra_tic = np.zeros_like(peakspectra)
+        for s in range(peakspectra.shape[0]):
+            peakspectra_tic[s, :] = normalize_spectrum(peakspectra[s, :], normalize='tic')
+        peakspectra_tic_ss = SS().fit_transform(peakspectra_tic)
+        data_umap = umap_it(peakspectra_tic_ss)
+        u_comp = data_umap.shape[1]
+        df_umap = pd.DataFrame(data=data_umap[:, 0:u_comp], columns=['umap_%d' % (i + 1) for i in range(u_comp)])
+        df_umap.to_csv(savecsv, index=False, sep=',')
+
+        labels = hdbscan_it(data_umap)
+        print("UMAP-HDBSCAN found {} labels in the data".format(np.unique(labels)))
+        df_umap_hdbscan = copy.deepcopy(df_umap)
+        df_umap_hdbscan.insert(df_umap_hdbscan.shape[1], column='hdbscan_labels', value=labels)
+        # savecsv = os.path.join(regDir, 'umap_hdbscan_{}.csv'.format(exprun))
+        df_umap_hdbscan.to_csv(savecsv, index=False, sep=',')
+
     # removing sparse features...
     nz_cent = []
     for feat in range(peakspectra.shape[1]):
         div = round((100 * (len(peakspectra[:, feat].nonzero()[0]) / peakspectra.shape[0])), 2)
         nz_cent.append(div)
     nz_cent = np.array(nz_cent, dtype=np.float32)
-    remove_perc_ = 99
+    remove_perc_ = 25
+
     fig, ax = plt.subplots(dpi=200)
     offsetbox = TextArea("{} out of {} features has less than {}% \nnon-zero elements: too sparse".format(
         len(np.where(nz_cent <= remove_perc_)[0]), len(nz_cent), remove_perc_))
@@ -3190,185 +3436,139 @@ def msmlfunc6(mspath, regID, threshold=0.85, save_rseg=False): # exprun,
     ax.set_title("% of non-zero elements in features", fontsize=10, fontweight='bold')
     ax.add_artist(ab)
     plt.show()
-    peakspec_feat_full = np.delete(peakspectra, np.where(nz_cent <= remove_perc_)[0], axis=1)
-    peakspec_feat_null = np.delete(peakspectra, np.where(nz_cent > remove_perc_)[0], axis=1)
-    peakmzs_feat = np.delete(peakmzs, np.where(nz_cent <= remove_perc_)[0]).reshape(-1)
-    peakmzs_null = np.delete(peakmzs, np.where(nz_cent > remove_perc_)[0]).reshape(-1)
-    ImzObj = ImzmlAll(mspath)
-    ImzObj.get_ion_images(regID, peakspec_feat_full, peakmzs_feat, top=True)
-    images_feat = _2d_to_3d(peakspec_feat_full, regionshape, localCoord)
-    images_null = _2d_to_3d(peakspec_feat_null, regionshape, localCoord)
-    images_feat_flat = images_feat.reshape(-1, images_feat.shape[2])
 
-    images_feat_flat_norm = np.zeros_like(images_feat_flat)
-    for s in range(images_feat_flat.shape[0]):
-        images_feat_flat_norm[s, :] = normalize_spectrum(images_feat_flat[s, :], normalize='tic')
-    images_feat_flat_norm_ss = SS().fit_transform(images_feat_flat_norm)
+    peakspec_dense = np.delete(peakspectra, np.where(nz_cent <= remove_perc_)[0], axis=1)
+    peakspec_sparse = np.delete(peakspectra, np.where(nz_cent > remove_perc_)[0], axis=1)
+    peakmzs_dense = np.delete(peakmzs, np.where(nz_cent <= remove_perc_)[0]).reshape(-1, 1)
+    peakmzs_sparse = np.delete(peakmzs, np.where(nz_cent > remove_perc_)[0]).reshape(-1, 1)
+    # ImzObj.get_ion_images(regID, peakspec_dense, peakmzs_dense, top=False)
+    # ImzObj.get_ion_images(regID, peakspec_sparse, peakmzs_sparse, top=False)
+    images_dense = _2d_to_3d(peakspec_dense, regionshape, localCoords)
+    images_sparse = _2d_to_3d(peakspec_sparse, regionshape, localCoords)
+    # save sparse images for visualization:
+    # saveimages(images_sparse, list(np.squeeze(peakmzs_sparse)), os.path.join(regDir, 'sparse_{}pc'.format(remove_perc_)))
+    images_dense_flat = images_dense.reshape(-1, images_dense.shape[2])
+    images_dense_flat_norm = np.zeros_like(images_dense_flat)
+    for s in range(images_dense_flat.shape[0]):
+        images_dense_flat_norm[s, :] = normalize_spectrum(images_dense_flat[s, :], normalize='tic')
+    images_dense_flat_norm_ss = SS().fit_transform(images_dense_flat_norm)
+    images_dense_norm_ss = images_dense_flat_norm_ss.reshape(regionshape[0], regionshape[1], images_dense_flat_norm_ss.shape[1])
     # images_feat_flat_norm_pt = PT(method="yeo-johnson").fit_transform(images_feat_flat_norm)
-    # +------------------+
-    # |      UMAP        |
-    # +------------------+
-    data_umap = umap_it(images_feat_flat_norm_ss)
-    # +-------------+
-    # |   HDBSCAN   |
-    # +-------------+
-    labels = hdbscan_it(data_umap)
     # +------------------------------+
     # |  cluster peak M/Zs with KDE  |
     # +------------------------------+
-    # def kdebandwidth(peakmzs_feat, bw):
-    kde = KernelDensity(kernel='gaussian', bandwidth=30).fit(peakmzs_feat) # 30
-    s = np.linspace(min(peakmzs_feat), max(peakmzs_feat))
-    e = kde.score_samples(s.reshape(-1, 1))
+    # if kde_cluster_:
+    bw = 30
+    nClusters, centroids = kdemzs(peakmzs_dense, bw)
 
-    mi, ma = signal.argrelextrema(e, np.less)[0], signal.argrelextrema(e, np.greater)[0]
-    mi_ = np.sort(np.append(mi, [0, len(s) - 1]))
-
-    center_ = s[ma].reshape(-1)
-
-    cluster_center = np.asarray([find_nearest(peakmzs_feat, i) for i in center_]).reshape(-1)
-    print("there are {} clusters(m/z s) with centers at: {}".format(len(cluster_center), cluster_center))
-    clusters = []
-    for mdx in range(len(mi_) - 1):
-        cluster = peakmzs_feat[np.where(
-            (peakmzs_feat >= s[mi_][mdx]) & (peakmzs_feat < s[mi_][mdx + 1]))]
-        # print(len(cluster), "\n", cluster)
-        clusters.append(cluster)
-
-    plt.plot(s, e, 'orange')
-    plt.vlines(cluster_center, ymin=min(e), ymax=max(e), colors='blue')
+    # +--------------------------------+
+    # |   ion-image/feature selection  |
+    # +--------------------------------+
+    # class PFA(object):
+    #     def __init__(self, n_features, q=None):
+    #         self.q = q
+    #         self.n_features = n_features
+    #
+    #     def fit(self, X):
+    #         if not self.q:
+    #             self.q = X.shape[1]
+    #
+    #         # sc = StandardScaler()
+    #         X = SS().fit_transform(X)
+    #
+    #         pca = PCA(n_components=self.q).fit(X)
+    #         A_q = pca.components_.T
+    #
+    #         kmeans = KMeans(n_clusters=self.n_features).fit(A_q)
+    #         clusters = kmeans.predict(A_q)
+    #         cluster_centers = kmeans.cluster_centers_
+    #
+    #         u_labels = np.unique(clusters)
+    #         for i in u_labels:
+    #             plt.scatter(A_q[clusters == i, 0], A_q[clusters == i, 1], label=i)
+    #         plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], s=10, color='k')
+    #         plt.legend()
+    #         plt.show()
+    #
+    #         # labels = hdbscan_it(A_q)
+    #
+    #         dists = defaultdict(list)
+    #         for i, c in enumerate(clusters):
+    #             dist = euclidean_distances([A_q[i, :]], [cluster_centers[c, :]])[0][0]
+    #             dists[c].append((i, dist))
+    #
+    #         self.indices_ = [sorted(f, key=lambda x: x[1])[0][0] for f in dists.values()]
+    #         self.features_ = X[:, self.indices_]
+    #
+    # pfa = PFA(n_features=100)
+    # pfa.fit(images_feat_flat_norm_ss)
+    # X = pfa.features_
+    # column_indices = pfa.indices_
+    # variance explained threshold
+    s1_v = []
+    s2_v = []
+    for m in range(images_dense_norm_ss.shape[2]):
+        image = images_dense_norm_ss[..., m]
+        u, s, vT = svd(image, full_matrices=False)
+        var_explained = np.round(s ** 2 / np.sum(s ** 2), decimals=3)
+        s1_v.append(var_explained[0])
+        s2_v.append(sum(var_explained[0:2]))
+    s1_v = np.array(s1_v)
+    s2_v = np.array(s2_v)
+    var_thre = np.percentile(s2_v, 25) #0.25
+    print("25 percentile value of ve: ", var_thre)
+    fig, ax = plt.subplots(dpi=300)
+    ax.plot(peakmzs_dense, s1_v, 'r', label='s1_v')
+    ax.plot(peakmzs_dense, s2_v, 'r', alpha=0.5, label='(s1+s2)_v')
+    ax.hlines(var_thre, xmin=peakmzs_dense[0] - 5, xmax=peakmzs_dense[-1] + 5, colors='black',
+              label='25 percentile: {}'.format(var_thre))
+    ax.legend(loc='upper right')
+    ax.set_title("Variance explained by SVD components", fontsize=15)
+    ax.set_xlabel("mz features/channels", fontsize=10)
+    ax.set_ylabel("variance", fontsize=10)
     plt.show()
-        # return len(cluster_center)
-    # cl = []
-    # for bw in range(1, 100):
-    #     cl.append(kdebandwidth(peakmzs_feat, bw))
 
-    # fig, ax = plt.subplots(dpi=100)
-    # ax.plot(np.arange(1, 100), cl)
-    # ax.set_xlim(0, 104)
-    # ax.set_xticks(np.arange(1, 101, 6))
-    # ax.set_xlabel("bandwidth", fontsize=10)
-    # ax.set_ylabel("#clusters", fontsize=10)
-    # ax.set_title("Kernel Density Estimation - peak m/z s", fontsize=15)
-    # plt.show()
-    from sklearn.cluster import KMeans
-    from sklearn.metrics.pairwise import euclidean_distances
+    print("number of ion images exceed ve threshold: ", len(np.where(s1_v > var_thre)[0]))
+    peakmzs_dense_ve = peakmzs_dense[np.where(s2_v > var_thre)[0]].reshape(-1)
+    s2_sorted_idx = s2_v.argsort()[::-1]
+    s2_sorted = s2_v[s2_sorted_idx]
+    s2_25_idx = s2_sorted_idx[np.where(s2_sorted > var_thre)]
+    s2_25_idx_drop = s2_sorted_idx[np.where(s2_sorted <= var_thre)]
+    print(len(s2_25_idx), s2_25_idx)
+    # visualize the sorted images
+    ve_mz_list = list(map(lambda ve, mz: (round(ve,4), mz[0]), s2_v[s2_25_idx], peakmzs_dense[s2_25_idx]))
+    savedir = os.path.join(regDir, 'dense_ve_sorted_{}'.format(var_thre))
+    masterPlot(images_dense_norm_ss[..., s2_25_idx[0:50]].transpose(2, 0, 1), ve_mz_list[0:50], Nc=5, Title="ve_kept")
+    # saveimages(images_dense_norm_ss[..., s2_25_idx], ve_mz_list, savedir)
+    ve_mz_list = list(map(lambda ve, mz: (round(ve,4), mz[0]), s2_v[s2_25_idx_drop], peakmzs_dense[s2_25_idx_drop]))
+    savedir = os.path.join(regDir, 'dense_ve_dropped_{}'.format(var_thre))
+    masterPlot(images_dense_norm_ss[..., s2_25_idx_drop[0:50]].transpose(2, 0, 1), ve_mz_list[0:50], Nc=5, Title="ve_dropped")
+    # saveimages(images_dense_norm_ss[..., s2_25_idx_drop], ve_mz_list, savedir)
+    # ImzObj = ImzmlAll(mspath)
+    # ImzObj.get_ion_images(regID=regID, peakspectra=peakspec_dense[:, s1_25_idx][:, 0:50],
+    #                       peakmzs=peakmzs_dense[s1_25_idx][:, 0:50])
+    # ImzObj.get_ion_images(regID=regID, peakspectra=peakspec_dense[:, s1_25_idx][:, -50:],
+    #                       peakmzs=peakmzs_dense[s1_25_idx][:, -50:])
 
-    class PFA(object):
-        def __init__(self, n_features, q=None):
-            self.q = q
-            self.n_features = n_features
-
-        def fit(self, X):
-            if not self.q:
-                self.q = X.shape[1]
-
-            # sc = StandardScaler()
-            X = SS().fit_transform(X)
-
-            pca = PCA(n_components=self.q).fit(X)
-            A_q = pca.components_.T
-
-            kmeans = KMeans(n_clusters=self.n_features).fit(A_q)
-            clusters = kmeans.predict(A_q)
-            cluster_centers = kmeans.cluster_centers_
-
-            u_labels = np.unique(clusters)
-            for i in u_labels:
-                plt.scatter(A_q[clusters == i, 0], A_q[clusters == i, 1], label=i)
-            plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], s=10, color='k')
-            plt.legend()
-            plt.show()
-
-            HDBSCAN_soft = False
-            min_cluster_size = 250
-            min_samples = 30
-            cluster_selection_method = 'eom'  # eom
-            if HDBSCAN_soft:
-                clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
-                                            cluster_selection_method=cluster_selection_method, prediction_data=True) \
-                    .fit(A_q)
-                soft_clusters = hdbscan.all_points_membership_vectors(clusterer)
-                labels = np.argmax(soft_clusters, axis=1)
-            else:
-                clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
-                                            cluster_selection_method=cluster_selection_method).fit(A_q)
-                labels = clusterer.labels_
-
-            # process HDBSCAN data
-            n_clusters_est = np.max(labels) + 1
-            if HDBSCAN_soft:
-                title = 'estimated number of clusters: ' + str(n_clusters_est)
-            else:
-                labels[labels == -1] = 19
-                title = 'estimated number of clusters: ' + str(n_clusters_est) + ', noise pixels are coded in cyan'
-            # plot
-            plt.figure(figsize=(12, 10))
-            plt.scatter(A_q[:, 0], A_q[:, 1], facecolors='None', edgecolors=cm.tab20(labels), alpha=0.9)
-            plt.xlabel('PFA 1', fontsize=30)  # only difference part from last one
-            plt.ylabel('PFA 2', fontsize=30)
-
-            # theme
-            plt.xticks(fontsize=20)
-            plt.yticks(fontsize=20)
-            plt.tick_params(size=10, color='black')
-            plt.title(title, fontsize=20)
-
-            ax = plt.gca()  # Get the current Axes instance
-
-            for axis in ['top', 'bottom', 'left', 'right']:
-                ax.spines[axis].set_linewidth(3)
-            ax.tick_params(width=3)
-            plt.show()
-            # chart(A_q, labels)
-
-            dists = defaultdict(list)
-            for i, c in enumerate(clusters):
-                dist = euclidean_distances([A_q[i, :]], [cluster_centers[c, :]])[0][0]
-                dists[c].append((i, dist))
-
-            self.indices_ = [sorted(f, key=lambda x: x[1])[0][0] for f in dists.values()]
-            self.features_ = X[:, self.indices_]
-
-    pfa = PFA(n_features=100)
-    pfa.fit(images_feat_flat_norm_ss)
-    X = pfa.features_
-    column_indices = pfa.indices_
-
+    # the features are sorted or not doesn't matter to PCA.
     # +------------+
     # |    PCA     |
     # +------------+
+    images_dense_flat_norm_ss_ve = images_dense_flat_norm_ss[:, np.where(s2_v > var_thre)[0]]
     pca = PCA(random_state=RandomState)  # pca object n_components=100,
-    pcs = pca.fit_transform(images_feat_flat_norm_ss)  # (4587, 2000)
+    pcs = pca.fit_transform(images_dense_flat_norm_ss_ve)  # (4587, 2000)
     pca_range = np.arange(1, pca.n_components_, 1)
     print(">> PCA: number of components #{}".format(pca.n_components_))
     evr = pca.explained_variance_ratio_
     evr_cumsum = np.cumsum(evr)
+    threshold = 0.85
     cut_evr = find_nearest(evr_cumsum, threshold)
-    nPCs = 20 #np.where(evr_cumsum == cut_evr)[0][0] + 1
+    nPCs = np.where(evr_cumsum == cut_evr)[0][0] + 1
     print(">> Nearest variance to threshold {:.4f} explained by #PCA components {}".format(cut_evr, nPCs))
+    if nPCs >= 50:  # 2 conditions to choose nPCs.
+        nPCs = 50
     df_pca = pd.DataFrame(data=pcs[:, 0:nPCs], columns=['PC_%d' % (i + 1) for i in range(nPCs)])
-    loadings = pca.components_.T
-    SSL = np.sum(loadings ** 2, axis=1)
-    n_cols = 5
-    if nPCs % n_cols == 0:
-        n_rows = int(nPCs / n_cols)
-    else:
-        n_rows = nPCs // n_cols + 1
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 12), subplot_kw={'xticks': (), 'yticks': ()})
-    for i, (colname, ax) in enumerate(tqdm(zip(df_pca, axes.ravel()))):
-        # print(i)
-        component = df_pca[colname].values
-        im = ax.imshow(component.reshape(regionshape), cmap='msml_list')
-        ax.set_title("{}. component".format((i + 1)))
-    fig.subplots_adjust(right=0.8)
-    # divider = make_axes_locatable(axes)
-    # cax = divider.append_axes('right', size='5%', pad=0.05)
-    # fig.colorbar(im, cax=cax, ax=ax)
-    # cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
-    # fig.colorbar(images[0], ax=axs, orientation='vertical', fraction=.2)
-    fig.colorbar(im, ax=axes, location='right', shrink=0.6)
-    plt.show()
+
     if plot_pca:
         MaxPCs = nPCs + 5
         fig, ax = plt.subplots(figsize=(20, 8), dpi=200)
@@ -3402,51 +3602,206 @@ def msmlfunc6(mspath, regID, threshold=0.85, save_rseg=False): # exprun,
 
         plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
         plt.show()
-        Nc = 2
-        # MaxPCs = nPCs# + 1
-        # if MaxPCs % Nc != 0:
-        #     Nr = int((nPCs + 1) / Nc)
-        # else:
-        #     Nr = int(nPCs/Nc)
-        #  #MaxPCs
-        # heights = [regionshape[1] for r in range(Nr)]
-        # widths = [regionshape[0] for r in range(Nc)]
-        # fig_width = 5.  # inches
-        # fig_height = fig_width * sum(heights) / sum(widths)
-        # fig, axs = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=600, constrained_layout=True,
-        #                         gridspec_kw={'height_ratios': heights})
-        # images = []
-        # pc = 0
-        # image = copy.deepcopy(pcs)
-        # from sklearn.preprocessing import minmax_scale
-        # image = minmax_scale(image.ravel(), feature_range=(10, 255)).reshape(image.shape)
-        # for r in range(Nr):
-        #     for c in range(Nc):
-        #         # Generate data with a range that varies from one plot to the next.
-        #         arrayPC = np.zeros([regionshape[0], regionshape[1]], dtype=np.float32)
-        #         for idx, coor in enumerate(localCoor):
-        #             arrayPC[coor[0], coor[1]] = image[idx, pc]
-        #         images.append(axs[r, c].imshow(arrayPC.T, origin='lower',
-        #                                            cmap='msml_list'))  # 'RdBu_r')) #
-        #         axs[r, c].label_outer()
-        #         axs[r, c].set_axis_off()
-        #         axs[r, c].set_title('PC{}'.format(pc + 1), fontsize=10, pad=0.25)
-        #         fig.subplots_adjust(top=0.95, bottom=0.02, left=0,
-        #                             right=1, hspace=0.14, wspace=0)
-        #         pc += 1
-        #
-        # def update(changed_image):
-        #     for im in images:
-        #         if (changed_image.get_cmap() != im.get_cmap()
-        #                 or changed_image.get_clim() != im.get_clim()):
-        #             im.set_cmap(changed_image.get_cmap())
-        #             im.set_clim(changed_image.get_clim())
-        #             im.set_tight_layout('tight')
-        #
-        # for im in images:
-        #     im.callbacks.connect('changed', update)
-        # fig.suptitle("PC images {}:reg {}".format(filename, regID))
-        # plt.show()
+
+    imageListpca = np.transpose(df_pca.values, (1, 0))
+    imageListpca = imageListpca.reshape(len(imageListpca), regionshape[0], regionshape[1])
+    componentList = list(df_pca.columns)
+    masterPlot(imageListpca, componentList, Title='PCA components', Nc=4)
+    # +-----------------+
+    # |       GMM       |
+    # +-----------------+
+    n_components = 5
+    span = 5
+    n_component = _generate_nComponentList(n_components, span)
+    repeat = 1
+    print("Consider for gmm >>", df_pca.columns[0:nPCs])
+    df_gmm_label = pd.DataFrame()
+    for i in range(repeat):  # may repeat several times
+        for j in range(n_component.shape[0]):  # ensemble with different n_component value
+            StaTime = time.time()
+            gmm = GMM(n_components=n_component[j], max_iter=5000,
+                      random_state=RandomState)  # max_iter does matter, no random seed assigned
+            labels = gmm.fit_predict(df_pca.values)
+            index = j + 1 + i * n_component.shape[0]
+            title = 'gmm_' + str(index) + '_' + str(n_component[j]) + '_' + str(i)
+            df_gmm_label[title] = labels
+            SpenTime = (time.time() - StaTime)
+            # progressbar
+            print('{}/{}, finish classifying {}, running time is: {} s'.format(index, repeat * span, title,
+                                                                               round(SpenTime, 2)))
+    def relabel(df_pixel_label):
+        pixel_relabel = np.empty([df_pixel_label.shape[0], 0])
+        for i in range(df_pixel_label.shape[1]):
+            column = df_pixel_label.iloc[:, i].value_counts()  # counts number of individual labels in each Gaussian dist
+            labels_old = column.index.values.astype(int)  # kinda take unique labels
+            labels_new = np.linspace(0, labels_old.shape[0] - 1, labels_old.shape[0]).astype(int)
+            column_new = df_pixel_label.iloc[:, i].replace(labels_old, labels_new)  # pd.series
+            pixel_relabel = np.append(pixel_relabel, column_new.values.astype(int).reshape(df_pixel_label.shape[0], 1),
+                                      axis=1)
+        return pixel_relabel
+
+    gmm_label_relab = relabel(df_gmm_label)
+    df_gmm_label_relab = pd.DataFrame(gmm_label_relab, columns=df_gmm_label.columns)
+    Nr = 5
+    Nc = 1
+    heights = [regionshape[1] for r in range(Nr)]
+    widths = [regionshape[0] for r in range(Nc)]
+    fig_width = 5.  # inches
+    fig_height = fig_width * sum(heights) / sum(widths)
+    fig, axes = plt.subplots(Nr, Nc, dpi=400, figsize=(fig_width, fig_height),
+                             # constrained_layout=True,
+                             subplot_kw={'xticks': (), 'yticks': ()})  #
+    for (columnName, columnData), ax in zip(df_gmm_label_relab.iteritems(), axes.ravel()):
+        print('Column Name : ', columnName)
+        print('Column Contents : ', np.unique(columnData.values))
+        imdata = columnData.values.reshape(regionshape)
+        im = ax.imshow(imdata.T, origin='lower', cmap='msml_list')
+        ax.set_title('reg{}: {}'.format(regID, columnName), fontsize=15, loc='center')
+        plt.colorbar(im, ax=ax, shrink=0.5)
+    fig.show()
+
+    # take foreground spectra(on-tissue?) -> TIC normalized
+    peakspec_dense_ve = peakspec_dense[:, np.where(s2_v > var_thre)[0]]
+    peakspec_dense_ve_tic = np.zeros_like(peakspec_dense_ve)
+    for s in range(peakspec_dense_ve.shape[0]):
+        peakspec_dense_ve_tic[s, :] = normalize_spectrum(peakspec_dense_ve[s, :], normalize='tic')
+    # take 99th percentile and clip intensities above that/ winsorize every image channel
+    wins_perc = 0.95
+    scale_up = round(peakspec_dense_ve_tic.shape[0]*wins_perc)
+    peakspec_dense_ve_tic_wins = np.zeros_like(peakspec_dense_ve_tic)
+    for m in range(peakspec_dense_ve_tic.shape[1]):
+        pixels = peakspec_dense_ve_tic[:, m]
+        thre = pixels[np.argsort(pixels)[scale_up]]
+        pixels[pixels > thre] = thre
+        pixels = (pixels - np.min(pixels)) / (np.max(pixels) - np.min(pixels))
+        peakspec_dense_ve_tic_wins[:, m] = pixels
+    # normalize min-max scale
+
+    # Transpose to get feature matrix
+    features = peakspec_dense_ve_tic_wins.T
+    # standardize pixel(foreground+background) features(probably already done)
+    # PCA -> pixel_feature_std
+    pca = PCA(random_state=RandomState, n_components=nPCs)  # pca object n_components=100,
+    pcs = pca.fit_transform(images_dense_flat_norm_ss_ve)
+    loadings = pca.components_.T
+    SSL = np.sum(loadings ** 2, axis=1)
+    # HC -> feature matrix
+    HC_method = 'ward'
+    HC_metric = 'euclidean'
+    Y = sch.linkage(features, method=HC_method, metric=HC_metric)
+    Z = sch.dendrogram(Y, no_plot=True)
+    HC_idx = Z['leaves']
+    HC_idx = np.array(HC_idx)
+    plt.figure(figsize=(15, 10))
+    thre_dist = 78
+    Z = sch.dendrogram(Y, color_threshold=thre_dist)
+    plt.title('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
+        HC_method, HC_metric, thre_dist))
+    plt.show()
+    # sort feature matrix based on HC results
+    # How much PCA loading covered by each cluster
+    # rank them based on SSL?
+    features_sorted = features[HC_idx]
+    fig = plt.figure(figsize=(15, 15), dpi=300)
+    axdendro = fig.add_axes([0.09, 0.1, 0.2, 0.8])
+    Z = sch.dendrogram(Y, color_threshold=thre_dist, orientation='left')
+    fig.gca().invert_yaxis()
+    axdendro.set_xticks([])
+    axdendro.set_yticks([])
+    # fig.show()
+    axmatrix = fig.add_axes([0.3, 0.1, 0.6, 0.8])
+    im = axmatrix.matshow(features_sorted, aspect='auto', origin='lower', cmap=cm.YlGnBu, interpolation='none')
+    fig.gca().invert_yaxis()
+    axmatrix.set_xticks([])
+    axmatrix.set_yticks([])
+    axcolor = fig.add_axes([0.92, 0.1, 0.02, 0.80])
+    axcolor.tick_params(labelsize=10)
+    plt.colorbar(im, cax=axcolor)
+    fig.suptitle('hierarchical clustering of ion images \n method: {}, metric: {}, threshold: {}'.format(
+                    HC_method, HC_metric, thre_dist), fontsize=16)
+    fig.show()
+
+    HC_labels = sch.fcluster(Y, thre_dist, criterion='distance')
+    elements, counts = np.unique(HC_labels, return_counts=True)
+    images_dense_norm_ss_ve = images_dense_flat_norm_ss_ve.reshape(regionshape[0], regionshape[1],
+                                            images_dense_flat_norm_ss_ve.shape[1]).transpose(2, 0, 1)
+    mean_imgs = []
+    total_SSLs = []
+    for label in elements:
+        idx = np.where(HC_labels == label)[0]
+        # total SSL
+        total_SSL = np.sum(SSL[idx])
+        # imgs in the cluster
+        current_cluster = images_dense_norm_ss_ve[idx]
+        savedir = os.path.join(regDir, 'cluster_{}'.format(label))
+        saveimages(np.transpose(current_cluster, (1, 2, 0)), peakmzs_dense_ve[idx], savedir)
+        # average img
+        mean_img = np.mean(current_cluster, axis=0)
+        # accumulate data
+        total_SSLs.append(total_SSL)
+        mean_imgs.append(mean_img)
+
+    rank_idx = np.argsort(total_SSLs)
+
+    mean_imgs_ = [mean_imgs[r] for r in rank_idx]
+    total_SSLs_ = [total_SSLs[r] for r in rank_idx]
+    counts_ = [counts[r] for r in rank_idx]
+    vList = ['Cluster-{}:SSL {} count {}'.format(c+1, round(i, 4), j) for c, (i, j) in
+             enumerate(zip(total_SSLs_, counts_))]
+    masterPlot(mean_imgs_, vList, Title='Mean ion images of clusters with SSL rank')
+
+    def get_colors(inp, colormap, vmin=None, vmax=None):
+        norm = plt.Normalize(vmin, vmax)
+        return colormap(norm(inp))
+
+    colors = get_colors(elements, mtl.colormaps['msml_list'])  # mtl.colormaps['RdYlBu_r']) #
+    # print(mtl.colormaps['msml_list'])
+    print(colors)
+    Nr, Nc = 11, 1
+    heights = [5 for r in range(Nr)]
+    widths = [15 for c in range(Nc)]
+    fig_width = 5.  # inches
+    fig_height = fig_width * sum(heights) / sum(widths)
+    fig, axes = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=400,
+                             constrained_layout=True,
+                             gridspec_kw={'height_ratios': heights})  # , sharex=True)
+    peak_mean = np.mean(peakspec_dense_ve, axis=0)
+    for i, ax in enumerate(axes.ravel()):
+        peak_norm = (peak_mean - np.min(peak_mean)) / np.ptp(peak_mean)
+        label_idx_rest = np.where(HC_labels != i + 1)
+        peak_norm[label_idx_rest] = 0
+        ax.vlines(peakmzs_dense_ve, ymin=0, ymax=peak_norm, colors=colors[i], label=i + 1)
+        ax.legend()
+
+    fig.suptitle("Mean spectrum of clusters", y=0.999)
+    fig.text(0.5, 0.003, 'm/z', ha='center')
+    fig.text(0.01, 0.5, 'intensity(normalized)', va='center', rotation='vertical')
+    plt.show()
+
+    # finding pca outliers
+    pca = PCA(random_state=RandomState, n_components=28)  # pca object n_components=100,
+    pcs = pca.fit_transform(images_dense_flat_norm_ss_ve)
+    AL = abs(loadings)  # .T brings it into feature space from component space
+    SAL = np.sum(abs(loadings), axis=1)
+    SAL_sorted_idx =  np.argsort(SAL)[::-1]
+
+    SL = loadings**2
+    SSL = np.sum(SL, axis=1)
+    SSL_sorted_idx = np.argsort(SSL)[::-1]
+    # print("Corr", np.corrcoef(images_dense_flat_norm_ss_ve[:, 729], images_dense_flat_norm_ss_ve[:, 892])[1,0]) # pearsonr
+
+    from pca import pca as pca2
+    model = pca2(random_state=RandomState)
+    results = model.fit_transform(images_dense_flat_norm_ss_ve, verbose=False)
+    print(results['topfeat'])
+
+    max_AL = []
+    for pc in range(AL.shape[1]):
+        max_AL.append(np.where(AL[:, pc] == max(AL[:, pc]))[0][0])
+    print("Here")
+
+    # save images in drive
+
     return
 
 def madev(d, axis=None):

@@ -30,7 +30,7 @@ from scipy.sparse import csc_matrix, eye, diags
 from scipy.sparse.linalg import spsolve
 
 from scipy.signal import argrelextrema
-
+from Esmraldi.esmraldi import imzmlio as io
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
 posLip = r'C:\Data\210427-Chen_poslip' #'/media/banikr/DATA/MALDI/demo_banikr_'
 posLipNew = r'C:\Data\220211_reyzerml_IMC_380_plate4A_poslipids'  #'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW'
@@ -42,9 +42,9 @@ pathList = [posLip, posLipNew] #, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 print(mspathList)
 regID = 1
-# ImzObj = ImzmlAll(mspathList[0])
+ImzObj = ImzmlAll(mspathList[0])
 # regionshape, lCoords = ImzObj.get_region_shape_coords(regID)
-msmlfunc6(mspathList[0], regID=regID, threshold=0.85)
+msmlfunc6(mspathList[0], regID=regID, exprun='post_umap')
 # _, _, regionshape, lCoors = ImzObj.resample_region(regID=1, tol=0.01, savedata=True)
 # print(np.array(regionshape), type(regionshape))
 # print(lCoors)

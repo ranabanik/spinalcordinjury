@@ -725,7 +725,7 @@ def masterPlot(imageList, valueList=None, oneImageshape=None, Title=None, Nc=3):
         new_list = list(set(axesList).difference(imgNList))
         for i in new_list:
             dr, dc = np.unravel_index(i, (Nr, Nc), 'C')
-            print("dr, dc", dr, dc)
+            # print("dr, dc", dr, dc)
             fig.delaxes(axes[dr, dc])
     if Title == None:
         Title = 'Plot'
@@ -811,13 +811,14 @@ def boxplotit(data, labels, Title):
     :param data: list
     :param labels: list
     :param Title: str
-    :return:
+    :return: boxplots
     """
     fig, ax1 = plt.subplots(figsize=(10, 6), dpi=600)
     # labels = ['old', 'new']
-    colors = ['maroon', 'darkblue'] #, 'orangered', 'olive', 'sienna']
-    medianprops = dict(linestyle='-', linewidth=2.5, color='yellow')
-    meanlineprops = dict(linestyle='--', linewidth=2.5, color='brown')
+    colorlist = ['maroon', 'darkblue', 'orangered', 'olive', 'sienna']
+    colornames = colorlist[:len(labels)]
+    medianprops = dict(linestyle='-', linewidth=2.5, color='yellow') #next(iter(colornames))) #
+    meanlineprops = dict(linestyle='--', linewidth=2.5, color='brown') #next(iter(colornames))) #
     # labels = ['max spec', 'corrected']
     bplot = ax1.boxplot(list(data),
                         notch=False, sym='+', vert=True,
@@ -832,8 +833,6 @@ def boxplotit(data, labels, Title):
         xlabel='Data',
         ylabel='Value')
     ax1.set_title('{}'.format(Title), fontsize=16)
-
-    # colors = ['maroon', 'darkblue', 'orangered', 'olive', 'sienna']
     medians = [bplot['medians'][i].get_ydata()[0] for i in range(len(labels))]
     pos = np.arange(len(labels)) + 1
     upper_labels = [str(round(s, 2)) for s in medians]
@@ -842,12 +841,13 @@ def boxplotit(data, labels, Title):
                  transform=ax1.get_xaxis_transform(),
                  horizontalalignment='center', fontsize=10,
                  weight='bold',
-                 color= colors[tick]) #'firebrick')  # )
+                 color=colornames[tick]) #'firebrick')  # )
     # for patch, color in zip(bplot['boxes'], colors):
     #     patch.set_facecolor(color)
 
-    for patch, color in zip(bplot['boxes'], colors):
+    for patch, color in zip(bplot['boxes'], colornames):
         patch.set_facecolor(color) #'slategrey')
+        patch.set_alpha(1)
     fig.show()
 
 def saveimages(images, mzs, directory):
@@ -3536,13 +3536,13 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     s2_25_idx_drop = s2_sorted_idx[np.where(s2_sorted <= var_thre)]
     print(len(s2_25_idx), s2_25_idx)
     # visualize the sorted images
-    ve_mz_list = list(map(lambda ve, mz: (round(ve,4), mz[0]), s2_v[s2_25_idx], peakmzs_dense[s2_25_idx]))
+    ve_mz_list = list(map(lambda ve, mz: (round(ve, 4), mz[0]), s2_v[s2_25_idx], peakmzs_dense[s2_25_idx]))
     savedir = os.path.join(regDir, 'dense_ve_sorted_{}'.format(var_thre))
-    masterPlot(images_dense_norm_ss[..., s2_25_idx[0:50]].transpose(2, 0, 1), ve_mz_list[0:50], Nc=5, Title="ve_kept")
+    # masterPlot(images_dense_norm_ss[..., s2_25_idx[0:50]].transpose(2, 0, 1), ve_mz_list[0:50], Nc=5, Title="ve_kept")
     # saveimages(images_dense_norm_ss[..., s2_25_idx], ve_mz_list, savedir)
-    ve_mz_list = list(map(lambda ve, mz: (round(ve,4), mz[0]), s2_v[s2_25_idx_drop], peakmzs_dense[s2_25_idx_drop]))
+    ve_mz_list = list(map(lambda ve, mz: (round(ve, 4), mz[0]), s2_v[s2_25_idx_drop], peakmzs_dense[s2_25_idx_drop]))
     savedir = os.path.join(regDir, 'dense_ve_dropped_{}'.format(var_thre))
-    masterPlot(images_dense_norm_ss[..., s2_25_idx_drop[0:50]].transpose(2, 0, 1), ve_mz_list[0:50], Nc=5, Title="ve_dropped")
+    # masterPlot(images_dense_norm_ss[..., s2_25_idx_drop[0:50]].transpose(2, 0, 1), ve_mz_list[0:50], Nc=5, Title="ve_dropped")
     # saveimages(images_dense_norm_ss[..., s2_25_idx_drop], ve_mz_list, savedir)
     # ImzObj = ImzmlAll(mspath)
     # ImzObj.get_ion_images(regID=regID, peakspectra=peakspec_dense[:, s1_25_idx][:, 0:50],
@@ -3550,13 +3550,56 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # ImzObj.get_ion_images(regID=regID, peakspectra=peakspec_dense[:, s1_25_idx][:, -50:],
     #                       peakmzs=peakmzs_dense[s1_25_idx][:, -50:])
 
-    # the features are sorted or not doesn't matter to PCA.
+    # the features are sorted or not, doesn't matter to PCA.
+    # images_dense_flat_norm_ss_ve = images_dense_flat_norm_ss[:, np.where(s2_v > var_thre)[0]]
+    # images_dense_norm_ss_ve = images_dense_flat_norm_ss_ve.reshape(regionshape[0], regionshape[1],
+    #                                         images_dense_flat_norm_ss_ve.shape[1]) #.transpose(2, 0, 1)
+    images_dense_norm_ss_ve = images_dense_norm_ss[..., np.where(s2_v > var_thre)[0]]
+    # +--------------------------------+
+    # |    spatial coherence/chaos     |
+    # +--------------------------------+
+    from Esmraldi.esmraldi.segmentation import find_similar_images_spatial_coherence
+    # images_dense_norm_ss_ve_sc, sc_idx = find_similar_images_spatial_coherence(images_dense_norm_ss_ve, 0, [60, 70, 80, 90])
+    # savedir = os.path.join(regDir, 'dense_ve_dropped_{}'.format(var_thre))
+    from Esmraldi.esmraldi.segmentation import spatial_coherence, spatial_chaos, average_distance_graph
+    from skimage.filters import sobel
+    # image3D_drop = images_dense_norm_ss[..., s2_25_idx_drop]
+    # image3D_kept = images_dense_norm_ss[..., s2_25_idx]
+    total_coherence = []
+    total_chaos = []
+    quantiles = [60, 70, 80, 90]
+    # for image3D in [image3D_drop, image3D_kept]:
+    for images in [images_dense_norm_ss_ve]:
+        coherence_values = []
+        chaos_values = []
+        for i in range(images.shape[-1]):
+            image2D = images[..., i]
+            imagenorm = np.uint8(cv2.normalize(image2D, None, 0, 255, cv2.NORM_MINMAX))
+            upper = 100
+            upper_threshold = np.percentile(imagenorm, upper)
+            edges = sobel(imagenorm)
+            for quantile in quantiles:
+                threshold = int(np.percentile(imagenorm, quantile))
+                sc = spatial_coherence((imagenorm > threshold) & (imagenorm <= upper_threshold))
+                coherence_values.append(sc)
+                threshold_ = np.percentile(edges, quantile)
+                dist_edges = average_distance_graph(edges, threshold_)
+                chaos_values.append(dist_edges)
+        total_coherence.append(coherence_values)
+        total_chaos.append(chaos_values)
+    boxplotit(data=total_coherence, labels=['qt-{}'.format(q) for q in quantiles], Title='Spatial coherence 70qt')
+    # boxplotit(total_chaos, ['ve -25', 've +25'], 'Spatial chaos 70qt')
+    # coherence_values = np.array(coherence_values)
+    # chaos_values = np.array(chaos_values)
+    # coherence_sorted_idx = coherence_values.argsort()[::-1]
+    # chaos_sorted_idx = chaos_values.argsort()  # chaos is less and reverse than coherence
+    # images_kept_coherence_sorted = image3D_kept[..., coherence_sorted_idx].transpose(2, 0, 1)
+    # images_kept_chaos_sorted = image3D_kept[..., chaos_sorted_idx].transpose(2, 0, 1)
     # +------------+
     # |    PCA     |
     # +------------+
-    images_dense_flat_norm_ss_ve = images_dense_flat_norm_ss[:, np.where(s2_v > var_thre)[0]]
-    pca = PCA(random_state=RandomState)  # pca object n_components=100,
-    pcs = pca.fit_transform(images_dense_flat_norm_ss_ve)  # (4587, 2000)
+    pca = PCA(random_state=RandomState)  #n_components=100,
+    pcs = pca.fit_transform(images_dense_flat_norm_ss_ve) # includes both foreground and background
     pca_range = np.arange(1, pca.n_components_, 1)
     print(">> PCA: number of components #{}".format(pca.n_components_))
     evr = pca.explained_variance_ratio_
@@ -3723,8 +3766,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
 
     HC_labels = sch.fcluster(Y, thre_dist, criterion='distance')
     elements, counts = np.unique(HC_labels, return_counts=True)
-    images_dense_norm_ss_ve = images_dense_flat_norm_ss_ve.reshape(regionshape[0], regionshape[1],
-                                            images_dense_flat_norm_ss_ve.shape[1]).transpose(2, 0, 1)
+
     mean_imgs = []
     total_SSLs = []
     for label in elements:
@@ -3734,7 +3776,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
         # imgs in the cluster
         current_cluster = images_dense_norm_ss_ve[idx]
         savedir = os.path.join(regDir, 'cluster_{}'.format(label))
-        saveimages(np.transpose(current_cluster, (1, 2, 0)), peakmzs_dense_ve[idx], savedir)
+        # saveimages(np.transpose(current_cluster, (1, 2, 0)), peakmzs_dense_ve[idx], savedir)
         # average img
         mean_img = np.mean(current_cluster, axis=0)
         # accumulate data
@@ -3748,7 +3790,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     counts_ = [counts[r] for r in rank_idx]
     vList = ['Cluster-{}:SSL {} count {}'.format(c+1, round(i, 4), j) for c, (i, j) in
              enumerate(zip(total_SSLs_, counts_))]
-    masterPlot(mean_imgs_, vList, Title='Mean ion images of clusters with SSL rank')
+    # masterPlot(mean_imgs_, vList, Title='Mean ion images of clusters with SSL rank')
 
     def get_colors(inp, colormap, vmin=None, vmax=None):
         norm = plt.Normalize(vmin, vmax)
@@ -3757,7 +3799,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     colors = get_colors(elements, mtl.colormaps['msml_list'])  # mtl.colormaps['RdYlBu_r']) #
     # print(mtl.colormaps['msml_list'])
     print(colors)
-    Nr, Nc = 11, 1
+    Nr, Nc = len(elements), 1
     heights = [5 for r in range(Nr)]
     widths = [15 for c in range(Nc)]
     fig_width = 5.  # inches
@@ -3779,29 +3821,57 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     plt.show()
 
     # finding pca outliers
-    pca = PCA(random_state=RandomState, n_components=28)  # pca object n_components=100,
+    pca = PCA(random_state=RandomState)  # pca object n_components=100,
     pcs = pca.fit_transform(images_dense_flat_norm_ss_ve)
-    AL = abs(loadings)  # .T brings it into feature space from component space
-    SAL = np.sum(abs(loadings), axis=1)
-    SAL_sorted_idx =  np.argsort(SAL)[::-1]
+    loadings_all = pca.components_.T
+    AL = abs(loadings_all)  # .T brings it into feature space from component space
+    SAL = np.sum(abs(loadings_all), axis=1)
+    SAL_sorted_idx = np.argsort(SAL)[::-1]
 
-    SL = loadings**2
-    SSL = np.sum(SL, axis=1)
-    SSL_sorted_idx = np.argsort(SSL)[::-1]
+    SL = loadings_all**2
+    SSL_all = np.sum(SL, axis=1)
+    SSL_sorted_idx = np.argsort(SSL_all)[::-1]
     # print("Corr", np.corrcoef(images_dense_flat_norm_ss_ve[:, 729], images_dense_flat_norm_ss_ve[:, 892])[1,0]) # pearsonr
 
     from pca import pca as pca2
     model = pca2(random_state=RandomState)
     results = model.fit_transform(images_dense_flat_norm_ss_ve, verbose=False)
     print(results['topfeat'])
-
-    max_AL = []
+    best_feat_idx = [int(i) - 1 for i in results['topfeat']['feature'].values]
+    weak_feat_idx = np.where(results['topfeat']['type'].values == 'weak')[0] - 1
+    max_AL = [] # maximum abs loading means best feature that influences a PC
     for pc in range(AL.shape[1]):
         max_AL.append(np.where(AL[:, pc] == max(AL[:, pc]))[0][0])
-    print("Here")
 
+    # masterPlot(images_dense_norm_ss_ve[max_AL[0:20], ...], peakmzs_dense_ve[max_AL[0:20]], Nc=4, Title='PCA best features')
     # save images in drive
+    min_AL = list(reversed(max_AL)) # weak features that influences a PC.
+    # masterPlot(images_dense_norm_ss_ve[min_AL[0:20], ...], peakmzs_dense_ve[min_AL[0:20]], Nc=4, Title='PCA weak features')
+    # Spatial coherence
 
+
+    # masterPlot(images_kept_coherence_sorted[:30], coherence_values[coherence_sorted_idx[:30]], Nc=5,
+    #            Title="Spatial coherence score(higher)")
+    # masterPlot(images_kept_coherence_sorted[-30:], coherence_values[coherence_sorted_idx[-30:]], Nc=5,
+    #            Title="Spatial coherence score(lower)")
+    # masterPlot(images_kept_chaos_sorted[-30:], chaos_values[chaos_sorted_idx[-30:]], Nc=5,
+    #            Title="Spatial chaos score(higher)")
+    # masterPlot(images_kept_chaos_sorted[:30], chaos_values[chaos_sorted_idx[:30]], Nc=5,
+    #            Title="Spatial chaos score(lower)")
+
+
+    from skimage.filters import threshold_multiotsu
+    n_classes = 5
+    img_thresholds = np.empty([n_classes - 1, 0])
+    img_segs = np.empty([0, regionshape[0], regionshape[1]])
+    print(img_segs.shape)
+    for idx in min_AL[:20]:
+        # for i in index:
+        thresholds = threshold_multiotsu(images_dense_norm_ss_ve[idx], classes=n_classes)  # first 2 columns are spatial index
+        img_seg = np.digitize(images_dense_norm_ss_ve[idx], bins=thresholds)
+        img_thresholds = np.append(img_thresholds, thresholds.reshape(thresholds.shape[0], 1), axis=1)
+        img_segs = np.append(img_segs, img_seg.reshape(1, img_seg.shape[0], img_seg.shape[1]), axis=0)
+    print("Here")
     return
 
 def madev(d, axis=None):

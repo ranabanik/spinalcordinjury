@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Codes.Utilities import _2d_to_3d, normalize_spectrum, msmlfunc6, matchSpecLabel2, ImzmlAll, rawVSprocessed
+from Utilities import _2d_to_3d, normalize_spectrum, msmlfunc6, matchSpecLabel2, ImzmlAll, rawVSprocessed
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ import seaborn as sns
 import pandas as pd
 from tqdm import tqdm
 import time
-from Codes.imzml import IMZMLExtract, getionimage
+from imzml import IMZMLExtract, getionimage
 from pyimzml.ImzMLParser import _bisect_spectrum
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.cm as cm
@@ -32,8 +32,8 @@ from scipy.sparse.linalg import spsolve
 from scipy.signal import argrelextrema
 from Esmraldi.esmraldi import imzmlio as io
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
-posLip = r'C:\Data\210427-Chen_poslip' #'/media/banikr/DATA/MALDI/demo_banikr_'
-posLipNew = r'C:\Data\220211_reyzerml_IMC_380_plate4A_poslipids'  #'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW'
+posLip = r'/media/banikr/DATA/MALDI/demo_banikr_' #'C:\Data\210427-Chen_poslip' #
+posLipNew = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW' #'C:\Data\220211_reyzerml_IMC_380_plate4A_poslipids'  #
 posLipNew2 = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate2A_poslipid-NEW'
 posLipNew3 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate3A_poslipids'
 posLipNew4 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate4A_poslipids'
@@ -42,7 +42,9 @@ pathList = [posLip, posLipNew] #, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 print(mspathList)
 regID = 1
-ImzObj = ImzmlAll(mspathList[0])
+# ImzObj = ImzmlAll(mspathList[0])
+# peakspec, peakmz = ImzObj.peak_pick(spectra=data, refmz=mzbinned)
+# print(peakspec.shape)
 # regionshape, lCoords = ImzObj.get_region_shape_coords(regID)
 msmlfunc6(mspathList[0], regID=regID, exprun='post_umap')
 # _, _, regionshape, lCoors = ImzObj.resample_region(regID=1, tol=0.01, savedata=True)

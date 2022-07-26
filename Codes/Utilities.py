@@ -36,8 +36,8 @@ import seaborn as sns
 from pyimzml.ImzMLParser import ImzMLParser, _bisect_spectrum
 from ms_peak_picker import pick_peaks
 # from imzml import IMZMLExtract, normalize_spectrum
-from matchms import Spectrum, calculate_scores
-from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
+# from matchms import Spectrum, calculate_scores
+# from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
 from tqdm import tqdm, tqdm_notebook
 import joblib
 from collections import defaultdict
@@ -372,7 +372,7 @@ class ImzmlAll(object):
             # array3D = np.zeros(regionshape, dtype=np.float32)
             nS = np.random.randint(len(regionPixels))
             lCoorIdx = []
-            for idx, coord in enumerate(tqdm(regionPixels, desc='binning')):
+            for idx, coord in enumerate(tqdm(regionPixels, desc='binning', total=len(regionPixels))):
                 xpos = coord[0] - minx
                 ypos = coord[1] - miny
                 lCoorIdx.append((xpos, ypos))
@@ -408,16 +408,16 @@ class ImzmlAll(object):
                 spectra_[s, :] = smoothspec
         return spectra_
 
-    def peak_pick(self, spectra, refmz, meanSpec=None):
+    def peak_pick(self, spectra, refmz, picking_method="quadratic", snr=10, intensity_threshold=5, fwhm_expansion=2,
+                  meanSpec=None):
         """
-        spectra: 2D array of spectra -> nSpec x nMZ
-        meanSpec: mean abundance/intensity of all regions
-        by peak_picking ...
+        :spectra: 2D array of spectra -> nSpec x nMZ
+        :refmz:
+        :picking_method: The name of the peak model to use. One of "quadratic", "gaussian", "lorentzian", or "apex"
+        :snr: Minimum signal-to-noise measurement to accept a peak; standard: lower value increases number of peaks
+        :intensity_threshold: Minimum intensity measurement to accept a peak; depends on instrument/ 0 -> more permissive
+        :fwhm_expansion: full_width_at_half_max = 0.025 ; shouldn't be more than 2; 1.2 - 1.4 is optimum
         """
-        picking_method = "quadratic"
-        snr = 10   #3 # standard: lower value increases number of peaks
-        intensity_threshold = 5    #5 # depends on instrument/ 0 -> more permissive
-        fwhm_expansion = 2# 1.4    # shouldn't be more than 2; 1.2 - 1.4 is optimum
         if meanSpec is None: #spectra.ndim == 2:
             meanSpec = np.mean(spectra, axis=0)
         # else:   # if mean of all regions given...
@@ -3372,7 +3372,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     regDir = os.path.join(dirname, 'reg_{}'.format(regID))
     if not os.path.isdir(regDir):
         os.mkdir(regDir)
-    peakfilename = os.path.join(regDir, 'peak_picked_reg_{}.h5'.format(regID))
+    peakfilename = os.path.join(regDir, 'realigned_15000_20_100.h5')#'peak_picked_reg_{}.h5'.format(regID))
     # regname = os.path.join(regDir, '{}_reg_{}_{}.h5'.format(filename, regID))
     if os.path.isfile(peakfilename):
         with h5py.File(peakfilename, 'r') as pfile:
@@ -3560,41 +3560,49 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # +--------------------------------+
     from Esmraldi.esmraldi.segmentation import find_similar_images_spatial_coherence
     # images_dense_norm_ss_ve_sc, sc_idx = find_similar_images_spatial_coherence(images_dense_norm_ss_ve, 0, [60, 70, 80, 90])
-    # savedir = os.path.join(regDir, 'dense_ve_dropped_{}'.format(var_thre))
     from Esmraldi.esmraldi.segmentation import spatial_coherence, spatial_chaos, average_distance_graph
-    from skimage.filters import sobel
+    # from skimage.filters import sobel
     # image3D_drop = images_dense_norm_ss[..., s2_25_idx_drop]
     # image3D_kept = images_dense_norm_ss[..., s2_25_idx]
     total_coherence = []
-    total_chaos = []
-    quantiles = [60, 70, 80, 90]
+    quantiles = [60] #, 70, 80, 90]
+    upper = 100
     # for image3D in [image3D_drop, image3D_kept]:
-    for images in [images_dense_norm_ss_ve]:
+    for quantile in quantiles:
         coherence_values = []
-        chaos_values = []
-        for i in range(images.shape[-1]):
-            image2D = images[..., i]
-            imagenorm = np.uint8(cv2.normalize(image2D, None, 0, 255, cv2.NORM_MINMAX))
-            upper = 100
+        for i in range(images_dense_norm_ss_ve.shape[-1]):
+            image = images_dense_norm_ss_ve[..., i]
+            imagenorm = np.uint8(cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX))
             upper_threshold = np.percentile(imagenorm, upper)
-            edges = sobel(imagenorm)
-            for quantile in quantiles:
-                threshold = int(np.percentile(imagenorm, quantile))
-                sc = spatial_coherence((imagenorm > threshold) & (imagenorm <= upper_threshold))
-                coherence_values.append(sc)
-                threshold_ = np.percentile(edges, quantile)
-                dist_edges = average_distance_graph(edges, threshold_)
-                chaos_values.append(dist_edges)
+            # edges = sobel(imagenorm)
+            threshold = int(np.percentile(imagenorm, quantile))
+            sc = spatial_coherence((imagenorm > threshold) & (imagenorm <= upper_threshold))
+            coherence_values.append(sc)
         total_coherence.append(coherence_values)
-        total_chaos.append(chaos_values)
-    boxplotit(data=total_coherence, labels=['qt-{}'.format(q) for q in quantiles], Title='Spatial coherence 70qt')
+    coherence_values = np.array(coherence_values)
+    sc_thre = np.percentile(coherence_values, 10)
+    # boxplotit(data=total_coherence, labels=['qt-{}'.format(q) for q in quantiles], Title='Spatial coherence')
     # boxplotit(total_chaos, ['ve -25', 've +25'], 'Spatial chaos 70qt')
-    # coherence_values = np.array(coherence_values)
     # chaos_values = np.array(chaos_values)
-    # coherence_sorted_idx = coherence_values.argsort()[::-1]
+    coherence_sorted_idx = coherence_values.argsort()[::-1]
+    coherence_sorted = coherence_values[coherence_sorted_idx]
+    coherence_10_idx = coherence_sorted_idx[np.where(coherence_sorted > sc_thre)]
+    coherence_10_idx_ = coherence_sorted_idx[np.where(coherence_sorted <= sc_thre)]
+    images_dense_norm_ss_ve_sc = images_dense_norm_ss_ve[..., coherence_10_idx] #np.where(coherence_values >= sc_thre)[0]]
+    peakmzs_dense_ve_sc = peakmzs_dense_ve[coherence_10_idx] #np.where(coherence_values >= sc_thre)[0]]
     # chaos_sorted_idx = chaos_values.argsort()  # chaos is less and reverse than coherence
     # images_kept_coherence_sorted = image3D_kept[..., coherence_sorted_idx].transpose(2, 0, 1)
     # images_kept_chaos_sorted = image3D_kept[..., chaos_sorted_idx].transpose(2, 0, 1)
+    savedir = os.path.join(regDir, 'coherent_{}'.format(sc_thre))
+    sc_mz_list = list(map(lambda sc, mz: (round(sc, 4), mz), coherence_values[coherence_10_idx], peakmzs_dense_ve_sc))
+    # saveimages(images_dense_norm_ss_ve_sc, sc_mz_list, savedir)
+    savedir_ = os.path.join(regDir, 'incoherent_{}'.format(sc_thre))
+    # images_dense_norm_ss_ve_sc_ = images_dense_norm_ss_ve[..., coherence_10_idx_]
+    peakmzs_dense_ve_sc_ = peakmzs_dense_ve[coherence_10_idx_]
+    sc_mz_list_ = list(
+        map(lambda sc, mz: (round(sc, 4), mz), coherence_values[coherence_10_idx_], peakmzs_dense_ve_sc_))
+    # saveimages(images_dense_norm_ss_ve[..., coherence_10_idx_], sc_mz_list_, savedir_)
+
     # +------------+
     # |    PCA     |
     # +------------+

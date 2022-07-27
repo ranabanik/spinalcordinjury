@@ -4,7 +4,7 @@ from glob import glob
 import math
 import numpy as np
 import pywt
-from Utilities import _2d_to_3d, normalize_spectrum, msmlfunc6, matchSpecLabel2, ImzmlAll, rawVSprocessed
+from Codes.Utilities import _2d_to_3d, normalize_spectrum, msmlfunc6, matchSpecLabel2, ImzmlAll, rawVSprocessed
 from tqdm import tqdm
 import pickle
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ import seaborn as sns
 import pandas as pd
 from tqdm import tqdm
 import time
-from imzml import IMZMLExtract, getionimage
+# from imzml import IMZMLExtract, getionimage
 from pyimzml.ImzMLParser import _bisect_spectrum
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.cm as cm
@@ -31,9 +31,10 @@ from scipy.sparse.linalg import spsolve
 
 from scipy.signal import argrelextrema
 from Esmraldi.esmraldi import imzmlio as io
+from Esmraldi.esmraldi import spectraprocessing as sp
 # posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
-posLip = r'/media/banikr/DATA/MALDI/demo_banikr_' #'C:\Data\210427-Chen_poslip' #
-posLipNew = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW' #'C:\Data\220211_reyzerml_IMC_380_plate4A_poslipids'  #
+posLip = r'C:\Data\210427-Chen_poslip' # '/media/banikr/DATA/MALDI/demo_banikr_'
+posLipNew = r'C:\Data\220211_reyzerml_IMC_380_plate4A_poslipids'  #'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW'
 posLipNew2 = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate2A_poslipid-NEW'
 posLipNew3 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate3A_poslipids'
 posLipNew4 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate4A_poslipids'
@@ -42,11 +43,41 @@ pathList = [posLip, posLipNew] #, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 print(mspathList)
 regID = 1
-# ImzObj = ImzmlAll(mspathList[0])
-# peakspec, peakmz = ImzObj.peak_pick(spectra=data, refmz=mzbinned)
-# print(peakspec.shape)
-# regionshape, lCoords = ImzObj.get_region_shape_coords(regID)
+# +----------------------------------+
+# |  preprocessing w ms_peak_picker  |
+# +----------------------------------+
+if __name__ != '__main__':
+    peakpath = os.path.join(r'C:\Data\210427-Chen_poslip\reg_1', 'resampled_reg_1_tol_0.01.h5')
+
+# +------------------------------+
+# |  preprocessing w prominence  |
+# +------------------------------+
+if __name__ != '__main__':
+    ImzObj = ImzmlAll(mspathList[0])
+    labeled_array, num_features = ImzObj._get_regions()
+    spectra = []
+    for i, (x, y, z) in enumerate(tqdm(ImzObj.parser.coordinates)):
+        if labeled_array[x, y] == regID:
+            mz, ints = ImzObj.parser.getspectrum(i)
+            spectra.append([mz, ints])
+    fac = 15000
+    nl = 2
+    wl = 100
+    peakmzs = sp.spectra_peak_mzs_adaptative_noiselevel(spectra, factor=fac, noise_level=nl, wlen=wl)  # noise_level=1,
+    print("peaks", peakmzs.shape, type(peakmzs))
+    realigned_spectra, aligned_mzs = np.array(sp.realign_mzs(spectra, peakmzs, reference="median", nb_occurrence=4, step=0.01))
+    print("realigned", realigned_spectra.shape)
+    print("aligned mzs", len(aligned_mzs))
+    resampfilename = os.path.join(os.path.join(posLip, 'reg_{}'.format(regID)), 'realigned_{}_{}_{}.h5'.format(fac, nl, wl))
+    regionshape, localCoords = ImzObj.get_region_shape_coords(regID=regID)
+    with h5py.File(resampfilename, 'w') as pfile:
+        pfile['peakspectra'] = realigned_spectra
+        pfile['peakmzs'] = aligned_mzs
+        pfile['regionshape'] = np.array(regionshape)
+        pfile['coordinates'] = localCoords
+
 msmlfunc6(mspathList[0], regID=regID, exprun='post_umap')
+
 # _, _, regionshape, lCoors = ImzObj.resample_region(regID=1, tol=0.01, savedata=True)
 # print(np.array(regionshape), type(regionshape))
 # print(lCoors)

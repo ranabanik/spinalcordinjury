@@ -34,7 +34,7 @@ from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
 import seaborn as sns
 from pyimzml.ImzMLParser import ImzMLParser, _bisect_spectrum
-from ms_peak_picker import pick_peaks
+import ms_peak_picker
 # from imzml import IMZMLExtract, normalize_spectrum
 # from matchms import Spectrum, calculate_scores
 # from matchms.similarity import CosineGreedy, CosineHungarian, ModifiedCosine
@@ -301,6 +301,15 @@ class ImzmlAll(object):
             regionshape.append(maxz - minz + 1)
         return regionshape
 
+    def get_region_spectra(self, regID):
+        labeled_array, num_features = self._get_regions()
+        spectra = []
+        for i, (x, y, z) in enumerate(self.parser.coordinates):
+            if labeled_array[x, y] == regID:
+                mz, ints = self.parser.getspectrum(i)
+                spectra.append([mz, ints])
+        return spectra
+
     def get_region_data(self, regID, whole=False):
         "data structure/matrix of the region"
         # if whole:
@@ -408,45 +417,59 @@ class ImzmlAll(object):
                 spectra_[s, :] = smoothspec
         return spectra_
 
-    def peak_pick(self, spectra, refmz, picking_method="quadratic", snr=10, intensity_threshold=5, fwhm_expansion=2,
-                  meanSpec=None):
+    def ms_peak_picker_wrapper(self, rawspectra, step=0.01, snr=7, mode='centroid', int_thr_fact=1000, fit='quadratic',
+                               precision=5, fwhm_expansion=1.2, savedir=None):
         """
-        :spectra: 2D array of spectra -> nSpec x nMZ
-        :refmz:
-        :picking_method: The name of the peak model to use. One of "quadratic", "gaussian", "lorentzian", or "apex"
-        :snr: Minimum signal-to-noise measurement to accept a peak; standard: lower value increases number of peaks
-        :intensity_threshold: Minimum intensity measurement to accept a peak; depends on instrument/ 0 -> more permissive
-        :fwhm_expansion: full_width_at_half_max ; shouldn't be more than 2; 1.2 - 1.4 is optimum
+        :param rawspectra: list/ndarray object with #spectrum x Nmz x Nint (N varies for processed spectra)
+        :param step: upsampling step
+        :param snr: SNR threshold
+        :param mode: 'profile' or 'centroid'
+        :param int_thr:
+        :param fit:
+        :param precision:
+        :param fwhm_expansion: higher value increases peak width + height as intervals are summed
+
+        :return: peakspectra -> 2d array #spectrum x nPeaks
+                 peakmzs -> list m/zs where peaks were found
+
+        e.g.:   ImzObj = Imzmlall(mspath)
+                peakspectra, peakmzs = ImzObj.ms_peak_picker_wrapper(spectra)
         """
-        if meanSpec is None: #spectra.ndim == 2:
-            meanSpec = np.mean(spectra, axis=0)
-        # else:   # if mean of all regions given...
-        # meanSpec = spectra
-        peak_list = pick_peaks(refmz,
-                               meanSpec,
-                               fit_type=picking_method,
-                               signal_to_noise_threshold=snr,
-                               intensity_threshold=intensity_threshold,
-                               integrate=False)
-        peak_mzs = [np.round(p.mz, 5) for p in peak_list]   # only for visualisation
+        binner = ms_peak_picker.scan_filter.LinearResampling(step)
+        rebinned = [binner(*s) for s in rawspectra]
+        intensity_grid = np.vstack([ri[1] for ri in rebinned])
+        mz_grid, intensity_average = ms_peak_picker.average_signal(rawspectra, dx=step)
+        intensity_average *= len(rawspectra)
+
+        peak_list = ms_peak_picker.pick_peaks(mz_grid, intensity_average,
+                                              signal_to_noise_threshold=snr, peak_mode=mode,
+                                              intensity_threshold=int_thr_fact * len(rawspectra), fit_type=fit)
+        peakmzs = [np.round(p.mz, precision) for p in peak_list]
+        print("There will be #{} peaks...".format(len(peakmzs)))
         peak_ranges = [
             (
                 p.mz - (p.full_width_at_half_max * fwhm_expansion),
                 p.mz + (p.full_width_at_half_max * fwhm_expansion),
             )
             for p in peak_list]
-        # print("peak ranges", peak_ranges)
-        peak_indices = [
-            (self._find_nearest(refmz, p[0]), self._find_nearest(refmz, p[1])) for p in peak_ranges
-        ]
-        spectra_ = []
-        for spectrum in spectra:
+        peak_indices = [(self._find_nearest(mz_grid, p[0]), self._find_nearest(mz_grid, p[1]))
+                        for p in peak_ranges]
+        peakspectra = []
+        for spectrum in tqdm(intensity_grid, desc='aligning peaks...'):
             peaks = []
             for p in peak_indices:
                 peaks.append(np.sum(spectrum[p[0]: p[1]]))
-            spectra_.append(peaks)
-        spectra = np.array(spectra_, dtype=np.float32)
-        return spectra, peak_mzs
+            peakspectra.append(peaks)
+        peakspectra = np.array(peakspectra, dtype=np.float32)
+
+        if os.path.isdir(savedir):
+            peakfilename = os.path.join(savedir,'peakspectra_step{}_snr{}_int{}.h5'
+                                        .format(str(step)[2:], snr, int_thr_fact))
+            print("saving file in {}".format(peakfilename))
+            with h5py.File(peakfilename, 'w') as pfile:  # saves the data
+                pfile['peakspectra'] = peakspectra
+                pfile['peakmzs'] = peakmzs
+        return peakspectra, peakmzs
 
     def get_mean_abundance(self):
         """
@@ -3395,13 +3418,20 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
             pfile['regionshape'] = np.array(regionshape)
             pfile['coordinates'] = localCoords
     savecsv = os.path.join(regDir, 'results_{}.csv'.format(exprun))
+    # +------------------------------------+
+    # |    get spectra from ion images     |
+    # +------------------------------------+
+    ionimages = ionimages.transpose(1, 2, 0)
+    ionimages_flat = ionimages.reshape(-1, ionimages.shape[2])
+    del_idx = np.where(np.mean(ionimages_flat, axis=1) == 0)[0]
+    peakspectra = np.delete(ionimages_flat, del_idx, axis=0)    # foreground x nm/z or npeak
+    peakspectra_tic = np.zeros_like(peakspectra)
+    for s in range(peakspectra.shape[0]):
+        peakspectra_tic[s, :] = normalize_spectrum(peakspectra[s, :], normalize='tic')
     # +----------------------------+
     # |       UMAP-HDBSCAN         |
     # +----------------------------+
     if umap_hdbscan_:
-        peakspectra_tic = np.zeros_like(peakspectra)
-        for s in range(peakspectra.shape[0]):
-            peakspectra_tic[s, :] = normalize_spectrum(peakspectra[s, :], normalize='tic')
         peakspectra_tic_ss = SS().fit_transform(peakspectra_tic)
         data_umap = umap_it(peakspectra_tic_ss)
         u_comp = data_umap.shape[1]
@@ -3416,18 +3446,11 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
         df_umap_hdbscan.to_csv(savecsv, index=False, sep=',')
 
     # +------------------------------------+
-    # |    get spectra from ion images     |
-    # +------------------------------------+
-    ionimages = ionimages.transpose(1, 2, 0)
-    ionimages_flat = ionimages.reshape(-1, ionimages.shape[2])
-    del_idx = np.where(np.mean(ionimages_flat, axis=1) == 0)[0]
-    peakspectra = np.delete(ionimages_flat, del_idx, axis=0)    # foreground x nm/z or npeak
-    # +------------------------------------+
     # |       remove sparse features       |
     # +------------------------------------+
     nz_cent = []
-    for feat in range(peakspectra.shape[1]):
-        div = round((100 * (len(peakspectra[:, feat].nonzero()[0]) / peakspectra.shape[0])), 2)
+    for feat in range(peakspectra_tic.shape[1]):
+        div = round((100 * (len(peakspectra_tic[:, feat].nonzero()[0]) / peakspectra_tic.shape[0])), 2)
         nz_cent.append(div)
     nz_cent = np.array(nz_cent, dtype=np.float32)
     remove_perc_ = 10 #25
@@ -3454,22 +3477,22 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
                Title="dense ion images")
     masterPlot(ionimages[..., perc_indexing[-50:][::-1]], nz_mz_list[-50:][::-1], Nc=5,
                Title="sparse ion images")
-    peakspec_dense = np.delete(peakspectra, np.where(nz_cent <= remove_perc_)[0], axis=1)
-    peakspec_sparse = np.delete(peakspectra, np.where(nz_cent > remove_perc_)[0], axis=1)
+    peakspec_tic_dense = np.delete(peakspectra_tic, np.where(nz_cent <= remove_perc_)[0], axis=1)
+    peakspec_tic_sparse = np.delete(peakspectra_tic, np.where(nz_cent > remove_perc_)[0], axis=1)
     peakmzs_dense = np.delete(peakmzs, np.where(nz_cent <= remove_perc_)[0]) #.reshape(-1, 1)
     peakmzs_sparse = np.delete(peakmzs, np.where(nz_cent > remove_perc_)[0]) #.reshape(-1, 1)
     # ImzObj.get_ion_images(regID, peakspec_dense, peakmzs_dense, top=False)
     # ImzObj.get_ion_images(regID, peakspec_sparse, peakmzs_sparse, top=False)
-    images_dense = _2d_to_3d(peakspec_dense, regionshape, localCoords)
-    images_sparse = _2d_to_3d(peakspec_sparse, regionshape, localCoords)
+    images_dense = _2d_to_3d(peakspec_tic_dense, regionshape, localCoords)
+    images_sparse = _2d_to_3d(peakspec_tic_sparse, regionshape, localCoords)
     # save sparse images for visualization:
     # saveimages(images_sparse, list(np.squeeze(peakmzs_sparse)), os.path.join(regDir, 'ionimages_sparse_{}pc'.format(remove_perc_)))
     images_dense_flat = images_dense.reshape(-1, images_dense.shape[2])
-    images_dense_flat_norm = np.zeros_like(images_dense_flat)
-    for s in range(images_dense_flat.shape[0]):
-        images_dense_flat_norm[s, :] = normalize_spectrum(images_dense_flat[s, :], normalize='tic')
+    # images_dense_flat_norm = np.zeros_like(images_dense_flat)
+    # for s in range(images_dense_flat.shape[0]):
+    #     images_dense_flat_norm[s, :] = normalize_spectrum(images_dense_flat[s, :], normalize='tic')
     # images_dense_flat_norm_ss = SS().fit_transform(images_dense_flat_norm)
-    images_dense_norm = images_dense_flat_norm.reshape(regionshape[0], regionshape[1], images_dense_flat_norm.shape[1]) # ss
+    # images_dense_norm = images_dense_flat_norm.reshape(regionshape[0], regionshape[1], images_dense_flat_norm.shape[1]) # ss
     # images_feat_flat_norm_pt = PT(method="yeo-johnson").fit_transform(images_feat_flat_norm)
     # +------------------------------+
     # |  cluster peak M/Zs with KDE  |
@@ -3528,8 +3551,8 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # +------------------------------------+
     s1_v = []
     s2_v = []
-    for m in range(images_dense_norm.shape[2]):
-        image = images_dense_norm[..., m]
+    for m in range(images_dense.shape[2]):
+        image = images_dense[..., m]
         u, s, vT = svd(image, full_matrices=False)
         var_explained = np.round(s ** 2 / np.sum(s ** 2), decimals=3)
         s1_v.append(var_explained[0])
@@ -3559,11 +3582,11 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # visualize the sorted images
     ve_mz_list = list(map(lambda ve, mz: (round(ve, 4), round(mz, 4)), s2_v[s2_indexing], peakmzs_dense[s2_indexing]))
     # savedir = os.path.join(regDir, 'ion_images_ve_sorted_{}'.format(var_thre))
-    masterPlot(images_dense_norm[..., s2_indexing[0:50]], ve_mz_list[0:50], Nc=5, Title="ve_exceed")
+    masterPlot(images_dense[..., s2_indexing[0:50]], ve_mz_list[0:50], Nc=5, Title="ve_exceed")
     # saveimages(images_dense_norm_ss[..., s2_25_idx], ve_mz_list, savedir)
     # ve_mz_list = list(map(lambda ve, mz: (round(ve, 4), mz[0]), s2_v[s2_25_idx_drop], peakmzs_dense[s2_25_idx_drop]))
     savedir = os.path.join(regDir, 'dense_ve_dropped_{}'.format(var_thre))
-    masterPlot(images_dense_norm[..., s2_indexing[-50:][::-1]], ve_mz_list[-50:][::-1], Nc=5, Title="ve_under")
+    masterPlot(images_dense[..., s2_indexing[-50:][::-1]], ve_mz_list[-50:][::-1], Nc=5, Title="ve_under")
     # saveimages(images_dense_norm_ss[..., s2_25_idx_drop], ve_mz_list, savedir)
     # ImzObj = ImzmlAll(mspath)
     # ImzObj.get_ion_images(regID=regID, peakspectra=peakspec_dense[:, s1_25_idx][:, 0:50],
@@ -3575,7 +3598,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # images_dense_flat_norm_ss_ve = images_dense_flat_norm_ss[:, np.where(s2_v > var_thre)[0]]
     # images_dense_norm_ss_ve = images_dense_flat_norm_ss_ve.reshape(regionshape[0], regionshape[1],
     #                                         images_dense_flat_norm_ss_ve.shape[1]) #.transpose(2, 0, 1)
-    images_dense_norm_ve = images_dense_norm[..., np.where(s2_v >= var_thre)[0]]
+    images_dense_ve = images_dense[..., np.where(s2_v >= var_thre)[0]]
     # +--------------------------------+
     # |    spatial coherence/chaos     |
     # +--------------------------------+
@@ -3591,8 +3614,8 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # for image3D in [image3D_drop, image3D_kept]:
     for quantile in quantiles:
         coherence_values = []
-        for i in range(images_dense_norm_ve.shape[-1]):
-            image = images_dense_norm_ve[..., i]
+        for i in range(images_dense_ve.shape[-1]):
+            image = images_dense_ve[..., i]
             imagenorm = np.uint8(cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX))
             upper_threshold = np.percentile(imagenorm, upper)
             # edges = sobel(imagenorm)
@@ -3614,10 +3637,10 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # peakmzs_dense_ve_sc = peakmzs_dense_ve[coherence_10_idx] #np.where(coherence_values >= sc_thre)[0]]
     # peakmzs_dense_ve_sc_ = peakmzs_dense_ve[coherence_10_idx_]
     sc_mz_list = list(map(lambda sc, mz: (round(sc, 4), round(mz, 4)), coherence_values[coherence_indexing], peakmzs_dense_ve[coherence_indexing]))
-    masterPlot(images_dense_norm_ve[..., coherence_indexing[0:50]], sc_mz_list[0:50], Nc=5, Title="Spatially coherent(best)")
-    masterPlot(images_dense_norm_ve[..., coherence_indexing[-50:][::-1]], sc_mz_list[-50:][::-1], Nc=5,
+    masterPlot(images_dense_ve[..., coherence_indexing[0:50]], sc_mz_list[0:50], Nc=5, Title="Spatially coherent(best)")
+    masterPlot(images_dense_ve[..., coherence_indexing[-50:][::-1]], sc_mz_list[-50:][::-1], Nc=5,
                Title="Spatially coherent(least)")
-    images_dense_norm_ve_sc = images_dense_norm_ve[..., np.where(coherence_values >= sc_thre)[0]]
+    images_dense_ve_sc = images_dense_ve[..., np.where(coherence_values >= sc_thre)[0]]
     peakmzs_dense_ve_sc = peakmzs_dense_ve[np.where(coherence_values >= sc_thre)[0]].reshape(-1)
     # chaos_sorted_idx = chaos_values.argsort()  # chaos is less and reverse than coherence
     # images_kept_coherence_sorted = image3D_kept[..., coherence_sorted_idx].transpose(2, 0, 1)
@@ -3635,10 +3658,10 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # +------------+
     # |    PCA     |
     # +------------+
-    images_dense_flat_norm_ve_sc = images_dense_norm_ve_sc.reshape(-1, images_dense_norm_ve_sc.shape[-1])
-    images_dense_flat_norm_ve_sc_ss = SS().fit_transform(images_dense_flat_norm_ve_sc)
+    images_dense_flat_ve_sc = images_dense_ve_sc.reshape(-1, images_dense_ve_sc.shape[-1])
+    images_dense_flat_ve_sc_ss = SS().fit_transform(images_dense_flat_ve_sc)
     pca = PCA(random_state=RandomState)  #n_components=100,
-    pcs = pca.fit_transform(images_dense_flat_norm_ve_sc_ss) # includes both foreground and background
+    pcs = pca.fit_transform(images_dense_flat_ve_sc_ss) # includes both foreground and background
     pca_range = np.arange(1, pca.n_components_, 1)
     print(">> PCA: number of components #{}".format(pca.n_components_))
     evr = pca.explained_variance_ratio_
@@ -3685,10 +3708,10 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
         plt.suptitle("PCA performed with {} features".format(pca.n_features_), fontsize=30)
         plt.show()
 
-    imageListpca = df_pca.values #np.transpose(df_pca.values, (1, 0))
-    imageListpca = imageListpca.reshape(regionshape[0], regionshape[1], imageListpca.shape[-1])
+    images_pca = df_pca.values #np.transpose(df_pca.values, (1, 0))
+    images_pca = images_pca.reshape(regionshape[0], regionshape[1], images_pca.shape[-1])
     componentList = list(df_pca.columns)
-    masterPlot(imageListpca, componentList, Title='PCA components', Nc=4)
+    masterPlot(images_pca, componentList, Title='PCA components', Nc=4)
     # +-----------------+
     # |       GMM       |
     # +-----------------+
@@ -3746,29 +3769,29 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # |    ion image/ feature clustering     |
     # +--------------------------------------+
     # take foreground spectra(on-tissue?) -> TIC normalized
-    peakspec_dense_ve = peakspec_dense[:, np.where(s2_v >= var_thre)[0]]
-    peakspec_dense_ve_sc = peakspec_dense_ve[:, np.where(coherence_values >= sc_thre)[0]]
-    peakspec_dense_ve_sc_tic = np.zeros_like(peakspec_dense_ve_sc)
-    for s in range(peakspec_dense_ve.shape[0]):
-        peakspec_dense_ve_sc_tic[s, :] = normalize_spectrum(peakspec_dense_ve_sc[s, :], normalize='tic')
+    peakspec_tic_dense_ve = peakspec_tic_dense[:, np.where(s2_v >= var_thre)[0]]
+    peakspec_tic_dense_ve_sc = peakspec_tic_dense_ve[:, np.where(coherence_values >= sc_thre)[0]]
+    # peakspec_dense_ve_sc_tic = np.zeros_like(peakspec_dense_ve_sc)
+    # for s in range(peakspec_dense_ve.shape[0]):
+    #     peakspec_dense_ve_sc_tic[s, :] = normalize_spectrum(peakspec_dense_ve_sc[s, :], normalize='tic')
     # take 99th percentile and clip intensities above that/ winsorize every image channel
     wins_perc = 0.95
-    scale_up = round(peakspec_dense_ve_sc_tic.shape[0]*wins_perc)
-    peakspec_dense_ve_sc_tic_wins = np.zeros_like(peakspec_dense_ve_sc_tic)
-    for m in range(peakspec_dense_ve_sc_tic.shape[1]):
-        pixels = peakspec_dense_ve_sc_tic[:, m]
+    scale_up = round(peakspec_tic_dense_ve_sc.shape[0]*wins_perc)
+    peakspec_tic_dense_ve_sc_wins = np.zeros_like(peakspec_tic_dense_ve_sc)
+    for m in range(peakspec_tic_dense_ve_sc.shape[1]):
+        pixels = peakspec_tic_dense_ve_sc[:, m]
         thre = pixels[np.argsort(pixels)[scale_up]]
         pixels[pixels > thre] = thre
         pixels = (pixels - np.min(pixels)) / (np.max(pixels) - np.min(pixels))
-        peakspec_dense_ve_sc_tic_wins[:, m] = pixels
+        peakspec_tic_dense_ve_sc_wins[:, m] = pixels
     # normalize min-max scale
 
     # Transpose to get feature matrix
-    features = peakspec_dense_ve_sc_tic_wins.T
+    features = peakspec_tic_dense_ve_sc_wins.T
     # standardize pixel(foreground+background) features(probably already done)
     # PCA -> pixel_feature_std
     pca = PCA(random_state=RandomState, n_components=nPCs)  # pca object n_components=100,
-    pcs = pca.fit_transform(images_dense_flat_norm_ve_sc_ss)
+    pcs = pca.fit_transform(images_dense_flat_ve_sc_ss)
     loadings = pca.components_.T
     SSL = np.sum(loadings ** 2, axis=1)
     # HC -> feature matrix
@@ -3809,8 +3832,8 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
 
     HC_labels = sch.fcluster(Y, thre_dist, criterion='distance')
     elements, counts = np.unique(HC_labels, return_counts=True)
-    images_dense_norm_ve_sc_ss = images_dense_flat_norm_ve_sc_ss.reshape(regionshape[0], regionshape[1],
-                                            images_dense_flat_norm_ve_sc_ss.shape[-1]) #.transpose(2, 0, 1)
+    images_dense_ve_sc_ss = images_dense_flat_ve_sc_ss.reshape(regionshape[0], regionshape[1],
+                                            images_dense_flat_ve_sc_ss.shape[-1]) #.transpose(2, 0, 1)
 
     mean_imgs = []
     total_SSLs = []
@@ -3819,7 +3842,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
         # total SSL
         total_SSL = np.sum(SSL[idx])
         # imgs in the cluster
-        current_cluster = images_dense_norm_ve_sc_ss.transpose(2, 0, 1)[idx]
+        current_cluster = images_dense_ve_sc_ss.transpose(2, 0, 1)[idx]
         # savedir = os.path.join(regDir, 'cluster_{}'.format(label))
         # saveimages(np.transpose(current_cluster, (1, 2, 0)), peakmzs_dense_ve[idx], savedir)
         # average img
@@ -3853,7 +3876,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     fig, axes = plt.subplots(Nr, Nc, figsize=(fig_width, fig_height), dpi=400,
                              constrained_layout=True,
                              gridspec_kw={'height_ratios': heights})  # , sharex=True)
-    peak_mean = np.mean(peakspec_dense_ve_sc, axis=0)
+    peak_mean = np.mean(peakspec_tic_dense_ve_sc, axis=0)
     for i, ax in enumerate(axes.ravel()):
         peak_norm = (peak_mean - np.min(peak_mean)) / np.ptp(peak_mean)
         label_idx_rest = np.where(HC_labels != i + 1)
@@ -3868,10 +3891,16 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
 
     # finding pca outliers
     pca = PCA(random_state=RandomState)  # pca object n_components=100,
-    pcs = pca.fit_transform(images_dense_flat_norm_ve_sc_ss)
+    pcs = pca.fit_transform(images_dense_flat_ve_sc_ss)
     loadings_all = pca.components_.T
     AL = abs(loadings_all)  # .T brings it into feature space from component space
-    SAL = np.sum(abs(loadings_all), axis=1)
+    AL_max_indexing = np.argmax(AL, axis=0)     # index of maximum absolute loadings
+    # AL_max_indexing matches with topfeat of pca2
+    mask = np.in1d(np.arange(0, len(AL_max_indexing)), np.unique(AL_max_indexing), invert=True)
+    feature_missing = np.arange(0, len(AL_max_indexing))[mask]
+    displayImage(np.mean(images_dense_ve_sc[..., feature_missing], axis=2))
+
+    SAL = np.sum(AL, axis=1)
     SAL_indexing = np.argsort(SAL)[::-1]
 
     SL = loadings_all**2
@@ -3881,7 +3910,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
 
     from pca import pca as pca2
     model = pca2(random_state=RandomState)
-    results = model.fit_transform(images_dense_flat_norm_ve_sc_ss, verbose=False)
+    results = model.fit_transform(images_dense_flat_ve_sc_ss, verbose=False)
     print(results['topfeat'])
     best_feat_idx = [int(i) - 1 for i in results['topfeat']['feature'].values]
     weak_feat_idx = np.where(results['topfeat']['type'].values == 'weak')[0] - 1
@@ -3901,7 +3930,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     print(img_segs.shape)
     for idx in min_AL[:20]:
         # for i in index:
-        image = images_dense_norm_ve_sc.transpose(2,0,1)[idx]
+        image = images_dense_ve_sc.transpose(2,0,1)[idx]
         thresholds = threshold_multiotsu(image, classes=n_classes)  # first 2 columns are spatial index
         img_seg = np.digitize(image, bins=thresholds)
         img_thresholds = np.append(img_thresholds, thresholds.reshape(thresholds.shape[0], 1), axis=1)
@@ -4399,55 +4428,47 @@ def matchSpecLabel2(plot_fig, *segs, **kwarr): # exprun
 
 # def rawVSprocessed(rawMSpath, proMSpath):
 def rawVSprocessed(mzraw, abraw, mzpro, abpro, labels=None, n_spec=None, exprun=None):
-    # rawMS = IMZMLExtract(rawMSpath)
-    # proMS = IMZMLExtract(proMSpath)
+    if exprun is None:
+        exprun = 'demo'
     if labels is None:
         labels = ['raw', 'processed']
-    # n_spec = 00 #np.random.randint(len(rawMS.parser.intensityLengths))
-    # mzraw = rawMS.parser.getspectrum(n_spec)[0]
-    # abraw = rawMS.parser.getspectrum(n_spec)[1]
-    #
-    # mzpro = proMS.parser.getspectrum(n_spec)[0]
-    # abpro = proMS.parser.getspectrum(n_spec)[1]
-    rawz_ = np.array(abraw).nonzero()
-    proz_ = np.array(abpro).nonzero()
+
     fig, ax = plt.subplots(2, 1, dpi=100)
 
     ax[0].hist(mzraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0], bins=200)  # , alpha=0.9)
     ax[0].set_xlabel("m/z", fontsize=12)
     ax[0].set_ylabel("counts", fontsize=12, color=(0.9, 0, 0))
     ax[0].legend(loc='upper center')
-    ax[0].grid()
+    # ax[0].grid()
+
+    ax0 = ax[0].twinx()
+    ax0.hist(mzpro, color=(0.0, 0, 0.9), linewidth=1.5, label=labels[1], bins=200, alpha=0.5)
+    ax0.set_xlabel("m/z", fontsize=12)
+    ax0.set_ylabel("counts", fontsize=12, color=(0.0, 0, 0.9)) #, alpha=0.5)
+    ax0.legend(loc='upper right')
 
     # ax[1].plot(mzraw, abraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0])  # , alpha=0.9)
     # ax[1].plot(mzraw[rawz_], abraw[rawz_], marker='r^')
-    ax[1].vlines(mzraw, [0], abraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0])  # , alpha=0.9)
+    ax[1].vlines(mzraw, ymin=[0], ymax=abraw, color=(0.9, 0, 0), linewidth=1.5, label=labels[0]) #, alpha=0.5)
     ax[1].set_xlabel("m/z", fontsize=12)
     ax[1].set_ylabel("intensity", fontsize=12, color=(0.9, 0, 0))
     ax[1].legend(loc='upper center')
-    ax[1].grid()
-
-    ax0 = ax[0].twinx()
-    ax0.hist(mzpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], bins=200, alpha=0.5)
-    ax0.set_xlabel("m/z", fontsize=12)
-    ax0.set_ylabel("counts", fontsize=12, color=(0, 0, 0.9), alpha=0.5)
-    ax0.legend(loc='upper right')
-    # ax0[0].grid()
+    # ax[1].grid()
 
     ax1 = ax[1].twinx()
     # ax1.plot(mzpro, abpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], alpha=0.5)
     # ax1.plot(mzpro[proz_], abpro[proz_], marker='bo')
-    ax1.vlines(mzpro, [0], abpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], alpha=0.5)
+    ax1.vlines(mzpro, ymin=[0], ymax=abpro, color=(0, 0, 0.9), linewidth=1.5, label=labels[1], alpha=0.3)
     ax1.set_xlabel("m/z", fontsize=12)
-    ax1.set_ylabel("intensity", fontsize=12, color=(0, 0, 0.9), alpha=0.5)
+    ax1.set_ylabel("intensity", fontsize=12, color=(0, 0, 0.9)) #, alpha=0.5)
     ax1.legend(loc='upper right')
     # ax1[1].grid()
     ax[0].set_title("Binning - histogram")
-    ax[1].set_title("Spectra")
+    ax[1].set_title("Spectrum")
     if n_spec is not None:
-        fig.suptitle('A spectrum representation #{} {}'.format(n_spec, exprun), fontsize=12, y=1)
+        fig.suptitle('A spectrum representation #{} {}'.format(n_spec, exprun), fontsize=14, y=0.99)
     else:
-        fig.suptitle('A spectrum representation {}'.format(exprun), fontsize=12, y=1)
+        fig.suptitle('A spectrum representation {}'.format(exprun), fontsize=14, y=0.99)
     # fig.subplots_adjust(top=0.85)
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig.tight_layout(pad=0.2)

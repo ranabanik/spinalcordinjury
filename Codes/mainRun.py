@@ -65,16 +65,16 @@ if __name__ != '__main__':
     wl = 100
     peakmzs = sp.spectra_peak_mzs_adaptative_noiselevel(spectra, factor=fac, noise_level=nl, wlen=wl)  # noise_level=1,
     print("peaks", peakmzs.shape, type(peakmzs))
-    realigned_spectra, aligned_mzs = np.array(sp.realign_mzs(spectra, peakmzs, reference="median", nb_occurrence=4, step=0.01))
+    realigned_spectra, aligned_mzs = np.array(sp.realign_mzs(spectra, peakmzs, reference="median", nb_occurrence=1, step=0.01))
     print("realigned", realigned_spectra.shape)
     print("aligned mzs", len(aligned_mzs))
     resampfilename = os.path.join(os.path.join(posLip, 'reg_{}'.format(regID)), 'realigned_{}_{}_{}.h5'.format(fac, nl, wl))
     regionshape, localCoords = ImzObj.get_region_shape_coords(regID=regID)
-    with h5py.File(resampfilename, 'w') as pfile:
-        pfile['peakspectra'] = realigned_spectra
-        pfile['peakmzs'] = aligned_mzs
-        pfile['regionshape'] = np.array(regionshape)
-        pfile['coordinates'] = localCoords
+    # with h5py.File(resampfilename, 'w') as pfile:
+    #     pfile['peakspectra'] = realigned_spectra
+    #     pfile['peakmzs'] = aligned_mzs
+    #     pfile['regionshape'] = np.array(regionshape)
+    #     pfile['coordinates'] = localCoords
 
 msmlfunc6(mspathList[0], regID=regID, exprun='post_umap')
 

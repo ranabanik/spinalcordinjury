@@ -304,7 +304,7 @@ class ImzmlAll(object):
     def get_region_spectra(self, regID):
         labeled_array, num_features = self._get_regions()
         spectra = []
-        for i, (x, y, z) in enumerate(self.parser.coordinates):
+        for i, (x, y, z) in enumerate(tqdm(self.parser.coordinates, desc='listing spectra...')):
             if labeled_array[x, y] == regID:
                 mz, ints = self.parser.getspectrum(i)
                 spectra.append([mz, ints])
@@ -3397,17 +3397,18 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     if not os.path.isdir(regDir):
         os.mkdir(regDir)
     # peakfilename = os.path.join(regDir, 'peak_picked_reg_{}.h5'.format(regID)) #'realigned_15000_20_100.h5')#
-    peakfilename = os.path.join(regDir, 'ion_images_tol_01.h5')
+    peakfilename = os.path.join(regDir, 'peakspectra_centroid_step01_snr7_int1000.h5')
     # regname = os.path.join(regDir, '{}_reg_{}_{}.h5'.format(filename, regID))
+    ImzObj = ImzmlAll(mspath)
     if os.path.isfile(peakfilename):
         with h5py.File(peakfilename, 'r') as pfile:
-            # peakspectra = np.array(pfile.get('peakspectra'))
-            ionimages = np.array(pfile.get('ionimages'))
+            peakspectra = np.array(pfile.get('peakspectra'))
+            # ionimages = np.array(pfile.get('ionimages'))
             peakmzs = np.array(pfile.get('peakmzs'))
-            regionshape = np.array(pfile.get('regionshape'))
-            localCoords = list(pfile.get('coordinates'))
+            # regionshape = np.array(pfile.get('regionshape'))
+            # localCoords = list(pfile.get('coordinates'))
+            regionshape, localCoords = np.array(ImzObj.get_region_shape_coords(regID=regID))
     else:
-        ImzObj = ImzmlAll(mspath)
         spectra, refmz, regionshape, localCoords = ImzObj.resample_region(regID, tol=0.01, savedata=True)
         # print(regionshape, type(regionshape))
         # spectra_smoothed = ImzObj.smooth_spectra(spectra, window_length=9, polyorder=2)
@@ -3421,10 +3422,10 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # +------------------------------------+
     # |    get spectra from ion images     |
     # +------------------------------------+
-    ionimages = ionimages.transpose(1, 2, 0)
-    ionimages_flat = ionimages.reshape(-1, ionimages.shape[2])
-    del_idx = np.where(np.mean(ionimages_flat, axis=1) == 0)[0]
-    peakspectra = np.delete(ionimages_flat, del_idx, axis=0)    # foreground x nm/z or npeak
+    # ionimages = ionimages.transpose(1, 2, 0)
+    # ionimages_flat = ionimages.reshape(-1, ionimages.shape[2])
+    # del_idx = np.where(np.mean(ionimages_flat, axis=1) == 0)[0]
+    # peakspectra = np.delete(ionimages_flat, del_idx, axis=0)    # foreground x nm/z or npeak
     peakspectra_tic = np.zeros_like(peakspectra)
     for s in range(peakspectra.shape[0]):
         peakspectra_tic[s, :] = normalize_spectrum(peakspectra[s, :], normalize='tic')
@@ -3473,6 +3474,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     plt.show()
     perc_indexing = np.argsort(nz_cent)[::-1]  # high to low indexing
     nz_mz_list = list(map(lambda nz, mz: (round(nz, 4), round(mz, 4)), nz_cent[perc_indexing], peakmzs[perc_indexing]))
+    ionimages = _2d_to_3d(peakspectra, regionshape, localCoords)
     masterPlot(ionimages[..., perc_indexing[0:50]], nz_mz_list[0:50], Nc=5,
                Title="dense ion images")
     masterPlot(ionimages[..., perc_indexing[-50:][::-1]], nz_mz_list[-50:][::-1], Nc=5,

@@ -32,8 +32,8 @@ from scipy.sparse.linalg import spsolve
 from scipy.signal import argrelextrema
 from Esmraldi.esmraldi import imzmlio as io
 from Esmraldi.esmraldi import spectraprocessing as sp
-# posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
-posLip = r'/media/banikr/DATA/MALDI/demo_banikr_' #'C:\Data\210427-Chen_poslip' #
+posLip = r'C:\Data\210427-Chen_poslip' #r'C:\Data\PosLip'
+# posLip = r'/media/banikr/DATA/MALDI/demo_banikr_' #'C:\Data\210427-Chen_poslip' #
 posLipNew = r'C:\Data\220211_reyzerml_IMC_380_plate4A_poslipids'  #'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate1A_poslipids-NEW'
 posLipNew2 = r'/media/banikr/DATA/MALDI/220210_reyzerml_IMC_380_plate2A_poslipid-NEW'
 posLipNew3 = r'/media/banikr/DATA/MALDI/220211_reyzerml_IMC_380_plate3A_poslipids'
@@ -43,11 +43,11 @@ pathList = [posLip] #, posLipNew] #, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 print(mspathList)
 regID = 1
+ImzObj = ImzmlAll(mspathList[0])
 # +----------------------------------+
 # |  preprocessing w ms_peak_picker  |
 # +----------------------------------+
 if __name__ != '__main__':
-    ImzObj = ImzmlAll(mspathList[0])
     rawspectra = ImzObj.get_region_spectra(regID)
     peakspectra, peakmzs = ImzObj.ms_peak_picker_wrapper(rawspectra, mode='profile', savedir=os.path.join(posLip, 'reg_{}'.format(regID)))
     specIdx = 89
@@ -80,7 +80,9 @@ if __name__ != '__main__':
     #     pfile['regionshape'] = np.array(regionshape)
     #     pfile['coordinates'] = localCoords
 
-msmlfunc6(mspathList[0], regID=regID, exprun='post_umap')
+# regionshape, localCoords = ImzObj.get_region_shape_coords(regID=regID)
+# print(regionshape, localCoords)
+msmlfunc6(mspathList[0], regID=regID, exprun='refined_ms')
 
 # _, _, regionshape, lCoors = ImzObj.resample_region(regID=1, tol=0.01, savedata=True)
 # print(np.array(regionshape), type(regionshape))

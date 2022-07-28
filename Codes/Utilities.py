@@ -3397,7 +3397,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     if not os.path.isdir(regDir):
         os.mkdir(regDir)
     # peakfilename = os.path.join(regDir, 'peak_picked_reg_{}.h5'.format(regID)) #'realigned_15000_20_100.h5')#
-    peakfilename = os.path.join(regDir, 'peakspectra_centroid_step01_snr7_int1000.h5')
+    peakfilename = os.path.join(regDir,'peak_picked_reg_1.h5')# 'peakspectra_step01_snr7_int1000.h5') # peakspectra_centroid_step01_snr7_int1000.h5')
     # regname = os.path.join(regDir, '{}_reg_{}_{}.h5'.format(filename, regID))
     ImzObj = ImzmlAll(mspath)
     if os.path.isfile(peakfilename):
@@ -3489,7 +3489,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     images_sparse = _2d_to_3d(peakspec_tic_sparse, regionshape, localCoords)
     # save sparse images for visualization:
     # saveimages(images_sparse, list(np.squeeze(peakmzs_sparse)), os.path.join(regDir, 'ionimages_sparse_{}pc'.format(remove_perc_)))
-    images_dense_flat = images_dense.reshape(-1, images_dense.shape[2])
+    # images_dense_flat = images_dense.reshape(-1, images_dense.shape[2])
     # images_dense_flat_norm = np.zeros_like(images_dense_flat)
     # for s in range(images_dense_flat.shape[0]):
     #     images_dense_flat_norm[s, :] = normalize_spectrum(images_dense_flat[s, :], normalize='tic')

@@ -43,7 +43,7 @@ pathList = [posLip] #, posLipNew] #, posLipNew2, posLipNew3, posLipNew4]
 mspathList = [glob(os.path.join(mp, '*.imzML'))[0] for mp in pathList]
 print(mspathList)
 regID = 1
-ImzObj = ImzmlAll(mspathList[0])
+# ImzObj = ImzmlAll(mspathList[0])
 # +----------------------------------+
 # |  preprocessing w ms_peak_picker  |
 # +----------------------------------+

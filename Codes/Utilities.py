@@ -198,6 +198,31 @@ class ImzmlAll(object):
         # print("There are {} regions.".format(num_features))
         return labeled_array, num_features
 
+    def get_region_spectra(self, regID):
+        labeled_array, num_features = self._get_regions()
+        spectra = []
+        for i, (x, y, z) in enumerate(tqdm(self.parser.coordinates, desc='listing spectra...')):
+            if labeled_array[x, y] == regID:
+                mz, ints = self.parser.getspectrum(i)
+                spectra.append([mz, ints])
+        return spectra
+
+    def get_region_all(self, regID):
+        labeled_array, num_features = self._get_regions()
+        regionCoords = []  # defaultdict(list)
+        minx, miny = np.inf, np.inf
+        maxx, maxy = -np.inf, -np.inf
+        for i, (x, y, z) in enumerate(self.parser.coordinates):
+            if labeled_array[x, y] == regID:
+                minx, miny = min(minx, x), min(miny, y)
+                maxx, maxy = max(maxx, x), max(maxy, y)
+                regionCoords.append((x, y, z))
+
+        regionshape = [maxx - minx + 1,
+                       maxy - miny + 1]
+        localCoords = [(x - minx, y - miny) for (x, y, z) in regionCoords]
+        return regionshape, localCoords
+
     def get_region_pixels(self, regID=None):
         """
         :param regID:
@@ -300,15 +325,6 @@ class ImzmlAll(object):
         if maxz - minz + 1 > 1:
             regionshape.append(maxz - minz + 1)
         return regionshape
-
-    def get_region_spectra(self, regID):
-        labeled_array, num_features = self._get_regions()
-        spectra = []
-        for i, (x, y, z) in enumerate(tqdm(self.parser.coordinates, desc='listing spectra...')):
-            if labeled_array[x, y] == regID:
-                mz, ints = self.parser.getspectrum(i)
-                spectra.append([mz, ints])
-        return spectra
 
     def get_region_data(self, regID, whole=False):
         "data structure/matrix of the region"
@@ -463,7 +479,7 @@ class ImzmlAll(object):
         peakspectra = np.array(peakspectra, dtype=np.float32)
 
         if os.path.isdir(savedir):
-            peakfilename = os.path.join(savedir,'peakspectra_step{}_snr{}_int{}.h5'
+            peakfilename = os.path.join(savedir, 'peakspectra_step{}_snr{}_int{}.h5'
                                         .format(str(step)[2:], snr, int_thr_fact))
             print("saving file in {}".format(peakfilename))
             with h5py.File(peakfilename, 'w') as pfile:  # saves the data
@@ -3397,7 +3413,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     if not os.path.isdir(regDir):
         os.mkdir(regDir)
     # peakfilename = os.path.join(regDir, 'peak_picked_reg_{}.h5'.format(regID)) #'realigned_15000_20_100.h5')#
-    peakfilename = os.path.join(regDir,'peak_picked_reg_1.h5')# 'peakspectra_step01_snr7_int1000.h5') # peakspectra_centroid_step01_snr7_int1000.h5')
+    peakfilename = os.path.join(regDir, 'realigned_15000_20_100.h5')# 'peakspectra_step01_snr7_int1000.h5') # peakspectra_centroid_step01_snr7_int1000.h5')
     # regname = os.path.join(regDir, '{}_reg_{}_{}.h5'.format(filename, regID))
     ImzObj = ImzmlAll(mspath)
     if os.path.isfile(peakfilename):
@@ -3407,7 +3423,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
             peakmzs = np.array(pfile.get('peakmzs'))
             # regionshape = np.array(pfile.get('regionshape'))
             # localCoords = list(pfile.get('coordinates'))
-            regionshape, localCoords = np.array(ImzObj.get_region_shape_coords(regID=regID))
+            regionshape, localCoords = ImzObj.get_region_all(regID=regID)
     else:
         spectra, refmz, regionshape, localCoords = ImzObj.resample_region(regID, tol=0.01, savedata=True)
         # print(regionshape, type(regionshape))
@@ -3611,7 +3627,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     # image3D_drop = images_dense_norm_ss[..., s2_25_idx_drop]
     # image3D_kept = images_dense_norm_ss[..., s2_25_idx]
     total_coherence = []
-    quantiles = [90] #, 70, 80, 90]
+    quantiles = [60] #, 70, 80, 90]
     upper = 100
     # for image3D in [image3D_drop, image3D_kept]:
     for quantile in quantiles:
@@ -3932,7 +3948,7 @@ def msmlfunc6(mspath, regID, exprun): # exprun,
     print(img_segs.shape)
     for idx in min_AL[:20]:
         # for i in index:
-        image = images_dense_ve_sc.transpose(2,0,1)[idx]
+        image = images_dense_ve_sc.transpose(2, 0, 1)[idx]
         thresholds = threshold_multiotsu(image, classes=n_classes)  # first 2 columns are spatial index
         img_seg = np.digitize(image, bins=thresholds)
         img_thresholds = np.append(img_thresholds, thresholds.reshape(thresholds.shape[0], 1), axis=1)
